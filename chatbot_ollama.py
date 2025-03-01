@@ -1,6 +1,5 @@
 import os
-from dotenv import load_dotenv
-load_dotenv()
+# dotenv 제거
 import streamlit as st
 import time
 import base64
@@ -29,11 +28,11 @@ session_id = st.session_state.id
 client = None
 
 # Ollama 서버 URL 설정 (기본값: localhost:11434)
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 
 # Ollama 모델 설정
-OLLAMA_EMBED_MODEL = os.getenv("OLLAMA_EMBED_MODEL", "llama3.2")
-OLLAMA_CHAT_MODEL = os.getenv("OLLAMA_CHAT_MODEL", "llama3.2")
+OLLAMA_EMBED_MODEL = os.environ.get("OLLAMA_EMBED_MODEL", "llama3.2")
+OLLAMA_CHAT_MODEL = os.environ.get("OLLAMA_CHAT_MODEL", "llama3.2")
 
 def reset_chat():
     st.session_state.messages = []
