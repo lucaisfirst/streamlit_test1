@@ -7,14 +7,15 @@ import tempfile
 import io
 import numpy as np
 from PIL import Image
+from langchain.llms import OpenAI
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores.faiss import FAISS
+from langchain_community.vectorstores import FAISS
+from langchain_community.embeddings import OpenAIEmbeddings
 from langchain_community.document_loaders import PyPDFLoader
 from langchain.prompts import ChatPromptTemplate
 from langchain.schema.runnable import RunnablePassthrough
 from langchain.schema.output_parser import StrOutputParser
 from langchain.chains.combine_documents import create_stuff_documents_chain
-import requests
 
 # 페이지 설정 - 모바일 호환성 개선
 st.set_page_config(
@@ -48,108 +49,21 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 필요한 라이브러리 임포트
+# 필요한 라이브러리 임포트 확인
 try:
+    from langchain_community.embeddings import OpenAIEmbeddings
     from langchain_community.vectorstores import FAISS
     from langchain_community.document_loaders import PyPDFLoader
+    from langchain.llms import OpenAI
     from langchain_core.messages import HumanMessage, SystemMessage
     from langchain.chains import create_history_aware_retriever, create_retrieval_chain
     from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
     from langchain.chains.combine_documents import create_stuff_documents_chain
-    
-    # Grok API 관련 라이브러리
-    from langchain_core.language_models.chat_models import BaseChatModel
-    from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-    from langchain_core.outputs import ChatGeneration, ChatResult
-    from typing import Any, Dict, List, Mapping, Optional
-    
-    # OpenAI 임베딩 모델 (Grok은 임베딩 API가 없어서 OpenAI 사용)
-    try:
-        from langchain_openai import OpenAIEmbeddings
-        has_openai = True
-    except ImportError:
-        has_openai = False
-        st.warning("OpenAI 라이브러리가 설치되지 않았습니다. 임베딩 기능이 제한될 수 있습니다.")
-        
 except ImportError as e:
     st.error(f"필요한 라이브러리가 설치되지 않았습니다: {str(e)}")
     st.warning("다음 명령어로 필요한 라이브러리를 설치하세요:")
-    st.code("pip install langchain langchain-community langchain-openai faiss-cpu streamlit requests", language="bash")
+    st.code("pip install langchain langchain-community openai pypdf streamlit", language="bash")
     st.stop()
-
-# Grok API 클래스 정의
-class GrokChatModel(BaseChatModel):
-    api_key: str
-    temperature: float = 0.7
-    max_tokens: int = 1024
-    
-    @property
-    def _llm_type(self) -> str:
-        return "grok-chat"
-    
-    def _generate(
-        self,
-        messages: List[Any],
-        stop: Optional[List[str]] = None,
-        run_manager: Optional[Any] = None,
-        **kwargs: Any,
-    ) -> ChatResult:
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
-        
-        # 메시지 형식 변환
-        formatted_messages = []
-        for message in messages:
-            if isinstance(message, SystemMessage):
-                formatted_messages.append({"role": "system", "content": message.content})
-            elif isinstance(message, HumanMessage):
-                formatted_messages.append({"role": "user", "content": message.content})
-            elif isinstance(message, AIMessage):
-                formatted_messages.append({"role": "assistant", "content": message.content})
-        
-        payload = {
-            "messages": formatted_messages,
-            "temperature": self.temperature,
-            "max_tokens": self.max_tokens,
-        }
-        
-        if stop:
-            payload["stop"] = stop
-        
-        try:
-            response = requests.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers=headers,
-                json=payload
-            )
-            response.raise_for_status()
-            response_data = response.json()
-            
-            # 응답 처리
-            message_content = response_data["choices"][0]["message"]["content"]
-            
-            return ChatResult(
-                generations=[
-                    ChatGeneration(
-                        message=AIMessage(content=message_content),
-                        generation_info={"finish_reason": response_data["choices"][0].get("finish_reason")}
-                    )
-                ]
-            )
-        except Exception as e:
-            raise ValueError(f"Grok API 호출 중 오류 발생: {str(e)}")
-    
-    async def _agenerate(
-        self,
-        messages: List[Any],
-        stop: Optional[List[str]] = None,
-        run_manager: Optional[Any] = None,
-        **kwargs: Any,
-    ) -> ChatResult:
-        # 비동기 구현은 동기 메서드를 호출
-        return self._generate(messages, stop, run_manager, **kwargs)
 
 if "id" not in st.session_state:
     st.session_state.id = uuid.uuid4()
@@ -158,23 +72,18 @@ if "id" not in st.session_state:
 session_id = st.session_state.id
 client = None
 
-# 환경 설정 - 시크릿에서 API 키 가져오기
-try:
-    # 로컬 개발 환경에서는 .streamlit/secrets.toml 파일에서 가져옴
-    GROK_API_KEY = st.secrets["api_keys"]["GROK_API_KEY"]
-    OPENAI_API_KEY = st.secrets["api_keys"]["OPENAI_API_KEY"]
-    
-    # API 키 디버깅 정보 (개발 중에만 사용)
-    st.sidebar.info(f"Grok API 키 로드됨: {GROK_API_KEY[:5]}...")
-except Exception as e:
-    # 시크릿이 없는 경우 환경 변수에서 가져옴
-    GROK_API_KEY = os.environ.get("GROK_API_KEY", "")
-    OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
-    st.sidebar.warning(f"시크릿 파일에서 API 키를 로드하는 중 오류 발생: {str(e)}")
+# OpenAI API 키 설정
+openai_api_key = os.environ.get("OPENAI_API_KEY", "")
+if not openai_api_key:
+    openai_api_key = st.sidebar.text_input("OpenAI API 키를 입력하세요", type="password")
+    if not openai_api_key:
+        st.warning("OpenAI API 키가 필요합니다.")
+        st.stop()
+os.environ["OPENAI_API_KEY"] = openai_api_key
 
-# API 키가 없는 경우 경고 표시
-if not GROK_API_KEY:
-    st.warning("Grok API 키가 설정되지 않았습니다. 챗봇 기능이 제한됩니다.")
+# 모델 설정
+EMBED_MODEL = "text-embedding-ada-002"
+CHAT_MODEL = "gpt-3.5-turbo"
 
 def reset_chat():
     st.session_state.messages = []
@@ -195,305 +104,215 @@ def display_pdf(file):
         # 반응형 디자인 유지하면서 기존 스타일로 복원
         pdf_display = f'''
             <div class="pdf-container">
-                <iframe src="data:application/pdf;base64,{base64_pdf}" 
-                        width="100%"
-                        height="500px"
-                        type="application/pdf">
-                    <p>PDF를 표시할 수 없습니다. <a href="data:application/pdf;base64,{base64_pdf}" download="{file.name}">PDF 다운로드</a></p>
-                </iframe>
+                <iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="600px" type="application/pdf"></iframe>
             </div>
         '''
-        st.markdown("### PDF 미리보기")
         st.markdown(pdf_display, unsafe_allow_html=True)
         
-        # 원본 파일 다운로드 버튼 제공
-        file.seek(0)
+        # 다운로드 버튼 추가
         st.download_button(
             label="PDF 다운로드",
-            data=file_data,
-            file_name=file.name,
+            data=file,
+            file_name="document.pdf",
             mime="application/pdf"
         )
-        
     except Exception as e:
-        st.error(f"PDF 표시 중 오류가 발생했습니다: {e}")
-    
-    # 파일 포인터 위치 다시 초기화
-    file.seek(0)
+        st.error(f"PDF 표시 중 오류가 발생했습니다: {str(e)}")
 
-# LLM 초기화 함수
 def initialize_basic_llm():
-    if "basic_llm" not in st.session_state or st.session_state.get("last_grok_key") != GROK_API_KEY:
-        try:
-            st.session_state.basic_llm = GrokChatModel(
-                api_key=GROK_API_KEY,
-                temperature=0.7,
-                max_tokens=1024
-            )
-            st.session_state.last_grok_key = GROK_API_KEY
-        except Exception as e:
-            st.error(f"Grok API 연결 오류: {str(e)}")
-            return None
-    
+    if "basic_llm" not in st.session_state:
+        st.session_state.basic_llm = OpenAI(
+            model=CHAT_MODEL,
+            temperature=0.7,
+            max_tokens=512,
+            stop=["<|im_end|>"],
+            repeat_penalty=1.1,
+        )
     return st.session_state.basic_llm
 
-# 임베딩 모델 초기화 함수
-def get_embeddings_model():
-    if has_openai:
-        # OpenAI 임베딩 사용 (Grok은 임베딩 API가 없음)
-        if not OPENAI_API_KEY:
-            st.sidebar.warning("OpenAI API 키가 설정되지 않았습니다. 사이드바에서 API 키를 입력하세요.")
-            return None
-        return OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
-    else:
-        st.error("임베딩 모델을 초기화할 수 없습니다. OpenAI API 키가 필요합니다.")
-        return None
-
-# 사이드바 구성 - 모바일 환경 지원 추가
-with st.sidebar:
-    st.header(f"Chatbot Options")
+def main():
+    # 세션 상태 초기화
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
     
-    # Grok API 키 입력 추가
-    grok_api_key = st.text_input("Grok API Key", value=GROK_API_KEY, type="password")
-    if grok_api_key:
-        GROK_API_KEY = grok_api_key
+    if "context" not in st.session_state:
+        st.session_state.context = None
     
-    # OpenAI API 키 입력 (임베딩용)
-    openai_api_key = st.text_input("OpenAI API Key (임베딩용)", value=OPENAI_API_KEY, type="password")
-    if openai_api_key:
-        os.environ["OPENAI_API_KEY"] = openai_api_key
-        OPENAI_API_KEY = openai_api_key
+    if "uploaded_file" not in st.session_state:
+        st.session_state.uploaded_file = None
     
-    # 채팅 초기화 버튼 추가
-    if st.button("Reset Chat"):
-        reset_chat()
-        st.success("Chat history has been reset.")
+    if "file_processed" not in st.session_state:
+        st.session_state.file_processed = False
+    
+    # 사이드바 설정
+    with st.sidebar:
+        st.title("Chatbot 옵션")
         
-        # API 키가 변경된 경우 LLM 재초기화
-        if "basic_llm" in st.session_state:
-            del st.session_state.basic_llm
-            llm = initialize_basic_llm()
-            st.success("LLM이 재초기화되었습니다.")
-    
-    st.markdown("---")
-    
-    # PDF 업로드 섹션 (선택 사항)
-    st.header("Optional: Add PDF Document")
-    st.write("Upload a PDF to enable document-based Q&A")
-    
-    # 모바일 환경을 위한 설명 추가
-    uploaded_file = st.file_uploader("Choose your `.pdf` file (optional)", type="pdf")
-    
-    if uploaded_file:
-        try:
-            file_key = f"{session_id}-{uploaded_file.name}"
-
-            with tempfile.TemporaryDirectory() as temp_dir:
-                file_path = os.path.join(temp_dir, uploaded_file.name)
-                
-                with open(file_path, "wb") as f:
-                    f.write(uploaded_file.getvalue())
-                
-                file_key = f"{session_id}-{uploaded_file.name}"
-                st.write("Indexing your document...")
-                
-                # 인덱싱 과정에 로딩 상태 표시
-                with st.spinner("Processing document..."):
-                    if file_key not in st.session_state.get('file_cache', {}):
-                        if os.path.exists(temp_dir):
-                            loader = PyPDFLoader(file_path)
-                        else:    
-                            st.error('Could not find the file you uploaded, please check again...')
-                            st.stop()
-                        
-                        pages = loader.load_and_split()
-                        
-                        # 임베딩 모델 가져오기
-                        embeddings = get_embeddings_model()
-                        if not embeddings:
-                            st.error("임베딩 모델을 초기화할 수 없습니다. OpenAI API 키를 입력하세요.")
-                            st.stop()
-                        
-                        # FAISS 벡터 저장소 생성
-                        vectorstore = FAISS.from_documents(
-                            documents=pages,
-                            embedding=embeddings
-                        )
-                        
-                        # 검색기 설정
-                        retriever = vectorstore.as_retriever(search_kwargs={"k": 2})
-                        
-                        # LLM 초기화
-                        llm = initialize_basic_llm()
-                        if not llm:
-                            st.error("LLM을 초기화할 수 없습니다.")
-                            st.stop()
-                        
-                        # 컨텍스트화 프롬프트 설정
-                        contextualize_q_system_prompt = """이전 대화 내용과 최신 사용자 질문이 있을 때, 이 질문이 이전 대화 내용과 관련이 있을 수 있습니다. 
-                        이런 경우, 대화 내용을 알 필요 없이 독립적으로 이해할 수 있는 질문으로 바꾸세요. 
-                        질문에 답할 필요는 없고, 필요하다면 그저 다시 구성하거나 그대로 두세요."""
-
-                        contextualize_q_prompt = ChatPromptTemplate.from_messages(
-                            [
-                                ("system", contextualize_q_system_prompt),
-                                MessagesPlaceholder("chat_history"),
-                                ("human", "{input}"),
-                            ]
-                        )
-
-                        # 대화 기록을 인식하는 검색기 생성
-                        history_aware_retriever = create_history_aware_retriever(
-                            llm, retriever, contextualize_q_prompt
-                        )
-
-                        # 질문-답변 프롬프트 설정
-                        qa_system_prompt = """당신은 유용하고 상세한 답변을 제공하는 지식이 풍부한 AI 어시스턴트입니다.
-                        사용자 질문에 답변할 때 다음 지침을 따르세요:
-                        
-                        1. 제공된 문서 내용을 기반으로 상세하고 명확한 답변을 제공하세요.
-                        2. 답변은 최소 3-5문장으로 구성하며, 필요한 경우 더 자세한 설명을 제공하세요.
-                        3. 문서에서 답변을 찾을 수 없는 경우, 정직하게 모른다고 말하세요.
-                        4. 답변 시 핵심 개념을 먼저 간략히 설명한 후, 세부 내용을 제공하는 구조로 작성하세요.
-                        5. 가능한 경우 예시나 유사 사례를 포함하여 답변을 강화하세요.
-                        
-                        ## 답변 형식
-                        📍 답변 내용: (상세한 답변을 여기에 작성)
-                        
-                        📍 참고 자료: (사용한 문서의 관련 부분)
-                        
-                        {context}"""
-                        
-                        qa_prompt = ChatPromptTemplate.from_messages(
-                            [
-                                ("system", qa_system_prompt),
-                                MessagesPlaceholder("chat_history"),
-                                ("human", "{input}"),
-                            ]
-                        )
-
-                        # 문서 체인 생성
-                        question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
-
-                        # 최종 RAG 체인 생성
-                        rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
-                        
-                        # 세션 상태에 체인 저장
-                        st.session_state.rag_chain = rag_chain
-
-                st.success("PDF loaded successfully! You can now ask questions about the document.")
-                display_pdf(uploaded_file)
-        except Exception as e:
-            st.error(f"An error occurred: {e}")
-            st.stop()     
-
-# 기본 LLM 초기화 (파일 업로드 없이도 사용 가능)
-llm = initialize_basic_llm()
-if not llm:
-    st.warning("Grok API 연결에 문제가 있습니다. API 키를 확인하세요.")
-
-# 웹사이트 제목
-st.title("Grok AI Chatbot")
-
-# 모드 표시
-if "rag_chain" in st.session_state:
-    st.info("📄 Document Q&A mode: Ask questions about the uploaded PDF")
-else:
-    st.info("💬 General chat mode: Ask me anything!")
-
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-
-# 대화 내용을 기록하기 위해 셋업
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+        # 채팅 초기화 버튼
+        if st.button("채팅 초기화"):
+            reset_chat()
         
-# 프롬프트 비용이 너무 많이 소요되는 것을 방지하기 위해
-MAX_MESSAGES_BEFORE_DELETION = 4
-
-# 웹사이트에서 유저의 인풋을 받고 위에서 만든 AI 에이전트 실행시켜서 답변 받기
-if prompt := st.chat_input("Ask a question!"):
-    # LLM이 초기화되지 않은 경우 처리
-    if not llm:
-        st.error("Grok API 연결에 문제가 있습니다. API 키를 확인하세요.")
-        st.stop()
-    
-    # 유저가 보낸 질문이면 유저 아이콘과 질문 보여주기
-    # 만약 현재 저장된 대화 내용 기록이 4개보다 많으면 자르기
-    if len(st.session_state.messages) >= MAX_MESSAGES_BEFORE_DELETION:
-        # Remove the first two messages
-        del st.session_state.messages[0]
-        del st.session_state.messages[0]  
-   
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
-
-    # AI가 보낸 답변이면 AI 아이콘이랑 LLM 실행시켜서 답변 받고 스트리밍해서 보여주기
-    with st.chat_message("assistant"):
-        message_placeholder = st.empty()
-        full_response = ""
+        st.header("PDF 업로드 (선택사항)")
+        uploaded_file = st.file_uploader("PDF 파일을 업로드하세요", type="pdf")
         
-        try:
-            if "rag_chain" in st.session_state:
-                # RAG 체인 사용 (PDF 업로드된 경우)
-                result = st.session_state.rag_chain.invoke({"input": prompt, "chat_history": st.session_state.messages})
-
-                # 증거자료 보여주기
-                with st.expander("Evidence context"):
-                    st.write(result["context"])
-
-                # 답변 표시 (스트리밍 효과)
-                for chunk in result["answer"].split(" "):
-                    full_response += chunk + " "
-                    time.sleep(0.01)  # 스트리밍 속도 조정
-                    message_placeholder.markdown(full_response + "▌")
-                message_placeholder.markdown(full_response)
-            else:
-                # 기본 LLM 사용 (PDF 업로드 없는 경우)
-                basic_llm = st.session_state.basic_llm
-                
-                # 기본 프롬프트 설정
-                basic_prompt = ChatPromptTemplate.from_messages([
-                    ("system", "당신은 유용하고 상세한 답변을 제공하는 지식이 풍부한 AI 어시스턴트입니다. 사용자의 질문에 친절하고 정확하게 답변해 주세요."),
-                    MessagesPlaceholder("chat_history"),
-                    ("human", "{input}")
-                ])
-                
-                # 채팅 체인 생성
-                chat_history = [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages]
-                
-                # Grok API 호출
-                messages = [
-                    SystemMessage(content="당신은 유용하고 상세한 답변을 제공하는 지식이 풍부한 AI 어시스턴트입니다. 사용자의 질문에 친절하고 정확하게 답변해 주세요.")
-                ]
-                
-                # 이전 대화 내용 추가
-                for m in st.session_state.messages[:-1]:  # 마지막 메시지(현재 질문)는 제외
-                    if m["role"] == "user":
-                        messages.append(HumanMessage(content=m["content"]))
-                    elif m["role"] == "assistant":
-                        messages.append(AIMessage(content=m["content"]))
-                
-                # 현재 질문 추가
-                messages.append(HumanMessage(content=prompt))
-                
-                # API 호출
-                response = basic_llm.invoke(messages)
-                full_response = response.content
-                
-                # 스트리밍 효과 시뮬레이션
-                for i in range(0, len(full_response), 10):
-                    chunk = full_response[i:i+10]
-                    displayed_text = full_response[:i+10]
-                    time.sleep(0.01)
-                    message_placeholder.markdown(displayed_text + "▌")
-                message_placeholder.markdown(full_response)
-                
-        except Exception as e:
-            error_msg = f"오류가 발생했습니다: {str(e)}"
-            st.error(error_msg)
-            full_response = error_msg
+        # 파일이 업로드되었고 이전에 처리된 파일과 다른 경우
+        if uploaded_file is not None and (st.session_state.uploaded_file is None or 
+                                         uploaded_file.name != st.session_state.uploaded_file.name):
+            st.session_state.uploaded_file = uploaded_file
+            st.session_state.file_processed = False
+            reset_chat()  # 새 파일이 업로드되면 채팅 초기화
             
-    st.session_state.messages.append({"role": "assistant", "content": full_response})
+            with st.spinner("PDF 파일을 처리 중입니다..."):
+                try:
+                    # 임시 파일로 저장
+                    with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
+                        tmp_file.write(uploaded_file.getvalue())
+                        tmp_path = tmp_file.name
+                    
+                    # PDF 로더 사용
+                    loader = PyPDFLoader(tmp_path)
+                    documents = loader.load()
+                    
+                    # 텍스트 분할
+                    text_splitter = RecursiveCharacterTextSplitter(
+                        chunk_size=1000,
+                        chunk_overlap=200
+                    )
+                    splits = text_splitter.split_documents(documents)
+                    
+                    # 임베딩 및 벡터 저장소 생성
+                    if len(splits) > 0:
+                        try:
+                            # OpenAI 임베딩 모델 사용
+                            embeddings = OpenAIEmbeddings(
+                                model=EMBED_MODEL
+                            )
+                            
+                            # FAISS 벡터 저장소 생성
+                            vectorstore = FAISS.from_documents(
+                                documents=splits,
+                                embedding=embeddings
+                            )
+                            
+                            # 검색기 생성
+                            retriever = vectorstore.as_retriever(
+                                search_type="similarity",
+                                search_kwargs={"k": 4}
+                            )
+                            
+                            # OpenAI LLM 설정 (매개변수 추가)
+                            llm = OpenAI(
+                                model=CHAT_MODEL,
+                                temperature=0.7,  # 약간의 창의성 허용
+                                max_tokens=512,  # 생성할 최대 토큰 수 증가
+                                stop=["<|im_end|>"],  # 적절한 중단 토큰 설정
+                                repeat_penalty=1.1,  # 반복 방지
+                            )
+                            
+                            # 프롬프트 템플릿 설정
+                            prompt = ChatPromptTemplate.from_template("""
+                            <context>
+                            {context}
+                            </context>
+                            
+                            질문에 대해 위의 컨텍스트 정보를 사용하여 답변해주세요. 
+                            컨텍스트에 관련 정보가 없는 경우, "제공된 문서에서 이 질문에 대한 답변을 찾을 수 없습니다."라고 말하세요.
+                            답변은 한국어로 제공하고, 가능한 한 자세하게 설명해주세요.
+                            
+                            질문: {question}
+                            """)
+                            
+                            # 문서 체인 생성
+                            document_chain = create_stuff_documents_chain(llm, prompt)
+                            
+                            # 검색 체인 생성
+                            retrieval_chain = create_retrieval_chain(retriever, document_chain)
+                            
+                            # 컨텍스트 저장
+                            st.session_state.context = retrieval_chain
+                            st.session_state.file_processed = True
+                            
+                            # 임시 파일 삭제
+                            os.unlink(tmp_path)
+                            
+                            st.success("PDF가 성공적으로 처리되었습니다!")
+                        except Exception as e:
+                            st.error(f"벡터 저장소 생성 중 오류: {str(e)}")
+                    else:
+                        st.error("PDF에서 텍스트를 추출할 수 없습니다.")
+                except Exception as e:
+                    st.error(f"PDF 처리 중 오류가 발생했습니다: {str(e)}")
+    
+    # 메인 영역
+    st.title("PDF Chatbot")
+    
+    # 기본 LLM 초기화 (파일 없이도 작동)
+    initialize_basic_llm()
+    
+    # 업로드된 파일이 있으면 표시
+    if st.session_state.uploaded_file is not None:
+        st.subheader("업로드된 PDF")
+        display_pdf(st.session_state.uploaded_file)
+    else:
+        st.info("PDF 파일을 업로드하면 문서 기반 질의응답이 가능합니다. 파일 업로드는 선택사항입니다.")
+    
+    # 채팅 인터페이스
+    st.subheader("채팅")
+    
+    # 이전 메시지 표시
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+    
+    # 사용자 입력
+    if prompt := st.chat_input("질문을 입력하세요..."):
+        # 사용자 메시지 추가
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+        
+        # 응답 생성
+        with st.chat_message("assistant"):
+            message_placeholder = st.empty()
+            full_response = ""
+            
+            try:
+                # 파일이 처리되었으면 RAG 사용, 아니면 기본 LLM 사용
+                if st.session_state.context and st.session_state.file_processed:
+                    # RAG를 사용한 응답 생성
+                    with st.spinner("답변 생성 중..."):
+                        response = st.session_state.context.invoke({
+                            "question": prompt
+                        })
+                        full_response = response["answer"]
+                else:
+                    # 기본 LLM을 사용한 응답 생성
+                    with st.spinner("답변 생성 중..."):
+                        system_prompt = """당신은 친절하고 도움이 되는 AI 어시스턴트입니다. 
+                        질문에 대해 명확하고 유용한 답변을 제공하세요. 
+                        답변은 한국어로 제공하고, 가능한 한 자세하게 설명해주세요."""
+                        
+                        prompt_template = ChatPromptTemplate.from_messages([
+                            ("system", system_prompt),
+                            ("human", "{question}")
+                        ])
+                        
+                        chain = prompt_template | st.session_state.basic_llm | StrOutputParser()
+                        full_response = chain.invoke({"question": prompt})
+                
+                # 타이핑 효과
+                for chunk in full_response.split():
+                    full_response_so_far = full_response[:full_response.find(chunk) + len(chunk)]
+                    message_placeholder.markdown(full_response_so_far + "▌")
+                    time.sleep(0.01)
+                
+                message_placeholder.markdown(full_response)
+            except Exception as e:
+                full_response = f"오류가 발생했습니다: {str(e)}"
+                message_placeholder.markdown(full_response)
+            
+            # 어시스턴트 메시지 추가
+            st.session_state.messages.append({"role": "assistant", "content": full_response})
+
+if __name__ == "__main__":
+    main() 
