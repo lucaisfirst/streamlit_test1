@@ -162,6 +162,11 @@ client = None
 GROK_API_KEY = os.environ.get("GROK_API_KEY", "xai-BZDTPNCSBayfE5PKA7dStIN0mK19IJtmpdiCch9aIWQFNZZKj6WZyBzM8ss9OBZBIPBzisnBDT5nQRgK")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 
+# 배포 환경에서 API 키 설정
+if not OPENAI_API_KEY and os.environ.get("IS_CLOUD_ENV", "").lower() == "true":
+    # 배포 환경에서는 환경 변수에서 API 키를 가져옵니다
+    OPENAI_API_KEY = "임베딩용_OPENAI_API_키_환경변수에서_설정"
+
 def reset_chat():
     st.session_state.messages = []
     st.session_state.context = None
