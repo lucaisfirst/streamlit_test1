@@ -1,24 +1,58 @@
 import os
-# dotenv 제거
 import streamlit as st
 import time
 import base64
 import uuid
 import tempfile
-import requests
 import io
 import numpy as np
-from PIL import Image
+
+# 필요한 라이브러리 확인 및 오류 메시지 표시
+required_packages = {
+    "fitz": "pymupdf",
+    "PIL": "pillow",
+    "requests": "requests",
+    "langchain_community": "langchain-community",
+    "langchain": "langchain",
+    "faiss": "faiss-cpu"
+}
+
+missing_packages = []
+
+# 필요한 라이브러리 가져오기 시도
+try:
+    from PIL import Image
+except ImportError:
+    missing_packages.append("pillow")
+
+try:
+    import requests
+except ImportError:
+    missing_packages.append("requests")
+
 try:
     import fitz  # PyMuPDF
 except ImportError:
-    st.error("PyMuPDF 라이브러리가 필요합니다. `pip install pymupdf`를 실행하여 설치하세요.")
-    
-from langchain_community.embeddings import OllamaEmbeddings
-from langchain_community.vectorstores import FAISS
-from langchain_community.document_loaders import PyPDFLoader
-from langchain_community.llms import Ollama
-from langchain_core.messages import HumanMessage, SystemMessage
+    missing_packages.append("pymupdf")
+
+try:
+    from langchain_community.embeddings import OllamaEmbeddings
+    from langchain_community.vectorstores import FAISS
+    from langchain_community.document_loaders import PyPDFLoader
+    from langchain_community.llms import Ollama
+    from langchain_core.messages import HumanMessage, SystemMessage
+    from langchain.chains import create_history_aware_retriever
+    from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+    from langchain.chains import create_retrieval_chain
+    from langchain.chains.combine_documents import create_stuff_documents_chain
+except ImportError:
+    missing_packages.append("langchain-community langchain")
+
+# 누락된 패키지가 있으면 오류 메시지 표시 및 종료
+if missing_packages:
+    st.error(f"다음 라이브러리를 설치해야 합니다: {', '.join(missing_packages)}")
+    st.code(f"pip install {' '.join(missing_packages)}", language="bash")
+    st.stop()
 
 if "id" not in st.session_state:
     st.session_state.id = uuid.uuid4()
@@ -164,9 +198,6 @@ with st.sidebar:
                         top_p=0.9  # 다양성 확보
                     )
                     
-                    from langchain.chains import create_history_aware_retriever
-                    from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-
                     # 컨텍스트화 프롬프트 설정
                     contextualize_q_system_prompt = """이전 대화 내용과 최신 사용자 질문이 있을 때, 이 질문이 이전 대화 내용과 관련이 있을 수 있습니다. 
                     이런 경우, 대화 내용을 알 필요 없이 독립적으로 이해할 수 있는 질문으로 바꾸세요. 
@@ -184,9 +215,6 @@ with st.sidebar:
                     history_aware_retriever = create_history_aware_retriever(
                         llm, retriever, contextualize_q_prompt
                     )
-
-                    from langchain.chains import create_retrieval_chain
-                    from langchain.chains.combine_documents import create_stuff_documents_chain
 
                     # 질문-답변 프롬프트 설정
                     qa_system_prompt = """당신은 유용하고 상세한 답변을 제공하는 지식이 풍부한 AI 어시스턴트입니다.
