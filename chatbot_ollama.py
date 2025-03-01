@@ -124,16 +124,38 @@ def display_pdf(file):
     # 파일 포인터 위치 다시 초기화
     file.seek(0)
 
+# 기본 Ollama LLM 설정 (파일 업로드 없이도 사용 가능)
+def initialize_basic_llm():
+    if "basic_llm" not in st.session_state:
+        st.session_state.basic_llm = Ollama(
+            base_url=OLLAMA_BASE_URL,
+            model=OLLAMA_CHAT_MODEL,
+            temperature=0.7,
+            num_predict=512,
+            stop=["<|im_end|>"],
+            repeat_penalty=1.1,
+            top_k=40,
+            top_p=0.9
+        )
+    return st.session_state.basic_llm
+
 # 사이드바 구성 - 모바일 환경 지원 추가
 with st.sidebar:
-    st.header(f"Add your documents!")
-    
-    # 모바일 환경을 위한 설명 추가
-    uploaded_file = st.file_uploader("Choose your `.pdf` file", type="pdf")
+    st.header(f"Chatbot Options")
     
     # 채팅 초기화 버튼 추가
     if st.button("Reset Chat"):
         reset_chat()
+        st.success("Chat history has been reset.")
+    
+    st.markdown("---")
+    
+    # PDF 업로드 섹션 (선택 사항)
+    st.header("Optional: Add PDF Document")
+    st.write("Upload a PDF to enable document-based Q&A")
+    
+    # 모바일 환경을 위한 설명 추가
+    uploaded_file = st.file_uploader("Choose your `.pdf` file (optional)", type="pdf")
     
     if uploaded_file:
         try:
@@ -238,14 +260,23 @@ with st.sidebar:
                         # 세션 상태에 체인 저장
                         st.session_state.rag_chain = rag_chain
 
-                st.success("Ready to Chat!")
+                st.success("PDF loaded successfully! You can now ask questions about the document.")
                 display_pdf(uploaded_file)
         except Exception as e:
             st.error(f"An error occurred: {e}")
             st.stop()     
 
+# 기본 LLM 초기화 (파일 업로드 없이도 사용 가능)
+initialize_basic_llm()
+
 # 웹사이트 제목
 st.title("Llama 3.2 LLM Chatbot")
+
+# 모드 표시
+if "rag_chain" in st.session_state:
+    st.info("📄 Document Q&A mode: Ask questions about the uploaded PDF")
+else:
+    st.info("💬 General chat mode: Ask me anything!")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -278,7 +309,7 @@ if prompt := st.chat_input("Ask a question!"):
         full_response = ""
         
         if "rag_chain" in st.session_state:
-            # RAG 체인 사용
+            # RAG 체인 사용 (PDF 업로드된 경우)
             result = st.session_state.rag_chain.invoke({"input": prompt, "chat_history": st.session_state.messages})
 
             # 증거자료 보여주기
@@ -292,8 +323,27 @@ if prompt := st.chat_input("Ask a question!"):
                 message_placeholder.markdown(full_response + "▌")
                 message_placeholder.markdown(full_response)
         else:
-            # 문서가 로드되지 않은 경우
-            full_response = "먼저 PDF 문서를 업로드해주세요."
-            message_placeholder.markdown(full_response)
+            # 기본 LLM 사용 (PDF 업로드 없는 경우)
+            basic_llm = st.session_state.basic_llm
+            
+            # 기본 프롬프트 설정
+            basic_prompt = ChatPromptTemplate.from_messages([
+                ("system", "당신은 유용하고 상세한 답변을 제공하는 지식이 풍부한 AI 어시스턴트입니다. 사용자의 질문에 친절하고 정확하게 답변해 주세요."),
+                MessagesPlaceholder("chat_history"),
+                ("human", "{input}")
+            ])
+            
+            # 채팅 체인 생성
+            chat_history = [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages]
+            
+            # 응답 생성
+            response = basic_llm.invoke(prompt)
+            
+            # 답변 표시 (스트리밍 효과)
+            for chunk in response.split(" "):
+                full_response += chunk + " "
+                time.sleep(0.05)
+                message_placeholder.markdown(full_response + "▌")
+                message_placeholder.markdown(full_response)
             
     st.session_state.messages.append({"role": "assistant", "content": full_response})
