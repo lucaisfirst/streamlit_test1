@@ -21,7 +21,7 @@ try:
 except ImportError as e:
     st.error(f"필요한 라이브러리가 설치되지 않았습니다: {str(e)}")
     st.warning("다음 명령어로 필요한 라이브러리를 설치하세요:")
-    st.code("pip install langchain langchain-community faiss-cpu", language="bash")
+    st.code("pip install langchain langchain-community faiss-cpu streamlit", language="bash")
     st.stop()
 
 if "id" not in st.session_state:
