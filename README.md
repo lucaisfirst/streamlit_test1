@@ -1,4 +1,4 @@
-# streamlit_test1
+streamlit_test1
 
 #로컬에서 챗봇 돌리기
 로컬에서 Ollama에서 챗봇들 다운받아서 문서교정용 챗봇 돌리는 중인데, 발열 미침
