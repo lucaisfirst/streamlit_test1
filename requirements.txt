@@ -4,4 +4,6 @@ faiss-cpu==1.7.4
 streamlit==1.32.2
 pypdf==5.3.0
 numpy==1.26.4
-pillow==10.2.0 
+pillow==10.2.0
+pandas==2.2.1
+plotly==5.19.0 
