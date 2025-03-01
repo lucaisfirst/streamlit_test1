@@ -5,53 +5,27 @@ import base64
 import uuid
 import tempfile
 import io
-import numpy as np
 
-# 필요한 라이브러리 확인 및 오류 메시지 표시
-required_packages = {
-    "fitz": "pymupdf",
-    "PIL": "pillow",
-    "requests": "requests",
-    "langchain_community": "langchain-community",
-    "langchain": "langchain",
-    "faiss": "faiss-cpu"
-}
-
-missing_packages = []
-
-# 필요한 라이브러리 가져오기 시도
+# 기본 라이브러리들 정상 임포트 확인
 try:
+    import numpy as np
     from PIL import Image
-except ImportError:
-    missing_packages.append("pillow")
-
-try:
     import requests
-except ImportError:
-    missing_packages.append("requests")
-
-try:
     import fitz  # PyMuPDF
-except ImportError:
-    missing_packages.append("pymupdf")
-
-try:
+    
+    # 랭체인 관련 라이브러리
     from langchain_community.embeddings import OllamaEmbeddings
     from langchain_community.vectorstores import FAISS
     from langchain_community.document_loaders import PyPDFLoader
     from langchain_community.llms import Ollama
     from langchain_core.messages import HumanMessage, SystemMessage
-    from langchain.chains import create_history_aware_retriever
+    from langchain.chains import create_history_aware_retriever, create_retrieval_chain
     from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-    from langchain.chains import create_retrieval_chain
     from langchain.chains.combine_documents import create_stuff_documents_chain
-except ImportError:
-    missing_packages.append("langchain-community langchain")
-
-# 누락된 패키지가 있으면 오류 메시지 표시 및 종료
-if missing_packages:
-    st.error(f"다음 라이브러리를 설치해야 합니다: {', '.join(missing_packages)}")
-    st.code(f"pip install {' '.join(missing_packages)}", language="bash")
+except ImportError as e:
+    st.error(f"필요한 라이브러리가 설치되지 않았습니다: {str(e)}")
+    st.warning("다음 명령어로 필요한 라이브러리를 설치하세요:")
+    st.code("pip install pymupdf pillow requests numpy langchain langchain-community faiss-cpu", language="bash")
     st.stop()
 
 if "id" not in st.session_state:
