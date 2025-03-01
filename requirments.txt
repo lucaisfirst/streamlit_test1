@@ -1,0 +1,3 @@
+python-dotenv
+streamlit
+# 앱에 필요한 다른 의존성 추가
