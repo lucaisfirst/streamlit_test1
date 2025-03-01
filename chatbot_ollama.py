@@ -7,6 +7,47 @@ import tempfile
 import io
 import numpy as np
 from PIL import Image
+from langchain_community.llms.ollama import Ollama
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.vectorstores.faiss import FAISS
+from langchain_community.embeddings.ollama import OllamaEmbeddings
+from langchain_community.document_loaders import PyPDFLoader
+from langchain.prompts import ChatPromptTemplate
+from langchain.schema.runnable import RunnablePassthrough
+from langchain.schema.output_parser import StrOutputParser
+from langchain.chains.combine_documents import create_stuff_documents_chain
+
+# 페이지 설정 - 모바일 호환성 개선
+st.set_page_config(
+    page_title="PDF Chatbot",
+    page_icon="📚",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# 반응형 디자인만 유지하고 기존 색상 복원
+st.markdown("""
+<style>
+    /* 모바일 환경에서의 스타일 조정 */
+    @media (max-width: 768px) {
+        .main .block-container {
+            padding-top: 1rem;
+            padding-left: 0.5rem;
+            padding-right: 0.5rem;
+        }
+        .stSidebar {
+            width: 100% !important;
+        }
+        iframe {
+            width: 100% !important;
+            height: 400px !important;
+        }
+        .pdf-container {
+            width: 100% !important;
+        }
+    }
+</style>
+""", unsafe_allow_html=True)
 
 # fitz 라이브러리(PyMuPDF) 관련 코드를 제거하고 기본 PDF 표시 방식 사용
 try:
@@ -53,12 +94,17 @@ def display_pdf(file):
         
         # base64로 인코딩하여 iframe으로 표시
         base64_pdf = base64.b64encode(file_data).decode('utf-8')
+        
+        # 반응형 디자인 유지하면서 기존 스타일로 복원
         pdf_display = f'''
-            <iframe src="data:application/pdf;base64,{base64_pdf}" 
-                    width="700"
-                    height="800"
-                    type="application/pdf">
-            </iframe>
+            <div class="pdf-container">
+                <iframe src="data:application/pdf;base64,{base64_pdf}" 
+                        width="100%"
+                        height="500px"
+                        type="application/pdf">
+                    <p>PDF를 표시할 수 없습니다. <a href="data:application/pdf;base64,{base64_pdf}" download="{file.name}">PDF 다운로드</a></p>
+                </iframe>
+            </div>
         '''
         st.markdown("### PDF 미리보기")
         st.markdown(pdf_display, unsafe_allow_html=True)
@@ -78,11 +124,17 @@ def display_pdf(file):
     # 파일 포인터 위치 다시 초기화
     file.seek(0)
 
+# 사이드바 구성 - 모바일 환경 지원 추가
 with st.sidebar:
     st.header(f"Add your documents!")
     
+    # 모바일 환경을 위한 설명 추가
     uploaded_file = st.file_uploader("Choose your `.pdf` file", type="pdf")
-
+    
+    # 채팅 초기화 버튼 추가
+    if st.button("Reset Chat"):
+        reset_chat()
+    
     if uploaded_file:
         try:
             file_key = f"{session_id}-{uploaded_file.name}"
@@ -95,94 +147,96 @@ with st.sidebar:
                 
                 file_key = f"{session_id}-{uploaded_file.name}"
                 st.write("Indexing your document...")
+                
+                # 인덱싱 과정에 로딩 상태 표시
+                with st.spinner("Processing document..."):
+                    if file_key not in st.session_state.get('file_cache', {}):
+                        if os.path.exists(temp_dir):
+                            loader = PyPDFLoader(file_path)
+                        else:    
+                            st.error('Could not find the file you uploaded, please check again...')
+                            st.stop()
+                        
+                        pages = loader.load_and_split()
+                        
+                        # Ollama 임베딩 모델 사용
+                        embeddings = OllamaEmbeddings(
+                            base_url=OLLAMA_BASE_URL,
+                            model=OLLAMA_EMBED_MODEL
+                        )
+                        
+                        # FAISS 벡터 저장소 생성 (Chroma 대신 사용)
+                        vectorstore = FAISS.from_documents(
+                            documents=pages,
+                            embedding=embeddings
+                        )
+                        
+                        # 검색기 설정
+                        retriever = vectorstore.as_retriever(search_kwargs={"k": 2})
+                        
+                        # Ollama LLM 설정 (매개변수 추가)
+                        llm = Ollama(
+                            base_url=OLLAMA_BASE_URL,
+                            model=OLLAMA_CHAT_MODEL,
+                            temperature=0.7,  # 약간의 창의성 허용
+                            num_predict=512,  # 생성할 최대 토큰 수 증가
+                            stop=["<|im_end|>"],  # 적절한 중단 토큰 설정
+                            repeat_penalty=1.1,  # 반복 방지
+                            top_k=40,  # 다양한 단어 선택 허용
+                            top_p=0.9  # 다양성 확보
+                        )
+                        
+                        # 컨텍스트화 프롬프트 설정
+                        contextualize_q_system_prompt = """이전 대화 내용과 최신 사용자 질문이 있을 때, 이 질문이 이전 대화 내용과 관련이 있을 수 있습니다. 
+                        이런 경우, 대화 내용을 알 필요 없이 독립적으로 이해할 수 있는 질문으로 바꾸세요. 
+                        질문에 답할 필요는 없고, 필요하다면 그저 다시 구성하거나 그대로 두세요."""
 
-                if file_key not in st.session_state.get('file_cache', {}):
-                    if os.path.exists(temp_dir):
-                        loader = PyPDFLoader(file_path)
-                    else:    
-                        st.error('Could not find the file you uploaded, please check again...')
-                        st.stop()
-                    
-                    pages = loader.load_and_split()
-                    
-                    # Ollama 임베딩 모델 사용
-                    embeddings = OllamaEmbeddings(
-                        base_url=OLLAMA_BASE_URL,
-                        model=OLLAMA_EMBED_MODEL
-                    )
-                    
-                    # FAISS 벡터 저장소 생성 (Chroma 대신 사용)
-                    vectorstore = FAISS.from_documents(
-                        documents=pages,
-                        embedding=embeddings
-                    )
-                    
-                    # 검색기 설정
-                    retriever = vectorstore.as_retriever(search_kwargs={"k": 2})
-                    
-                    # Ollama LLM 설정 (매개변수 추가)
-                    llm = Ollama(
-                        base_url=OLLAMA_BASE_URL,
-                        model=OLLAMA_CHAT_MODEL,
-                        temperature=0.7,  # 약간의 창의성 허용
-                        num_predict=512,  # 생성할 최대 토큰 수 증가
-                        stop=["<|im_end|>"],  # 적절한 중단 토큰 설정
-                        repeat_penalty=1.1,  # 반복 방지
-                        top_k=40,  # 다양한 단어 선택 허용
-                        top_p=0.9  # 다양성 확보
-                    )
-                    
-                    # 컨텍스트화 프롬프트 설정
-                    contextualize_q_system_prompt = """이전 대화 내용과 최신 사용자 질문이 있을 때, 이 질문이 이전 대화 내용과 관련이 있을 수 있습니다. 
-                    이런 경우, 대화 내용을 알 필요 없이 독립적으로 이해할 수 있는 질문으로 바꾸세요. 
-                    질문에 답할 필요는 없고, 필요하다면 그저 다시 구성하거나 그대로 두세요."""
+                        contextualize_q_prompt = ChatPromptTemplate.from_messages(
+                            [
+                                ("system", contextualize_q_system_prompt),
+                                MessagesPlaceholder("chat_history"),
+                                ("human", "{input}"),
+                            ]
+                        )
 
-                    contextualize_q_prompt = ChatPromptTemplate.from_messages(
-                        [
-                            ("system", contextualize_q_system_prompt),
-                            MessagesPlaceholder("chat_history"),
-                            ("human", "{input}"),
-                        ]
-                    )
+                        # 대화 기록을 인식하는 검색기 생성
+                        history_aware_retriever = create_history_aware_retriever(
+                            llm, retriever, contextualize_q_prompt
+                        )
 
-                    # 대화 기록을 인식하는 검색기 생성
-                    history_aware_retriever = create_history_aware_retriever(
-                        llm, retriever, contextualize_q_prompt
-                    )
+                        # 질문-답변 프롬프트 설정
+                        qa_system_prompt = """당신은 유용하고 상세한 답변을 제공하는 지식이 풍부한 AI 어시스턴트입니다.
+                        사용자 질문에 답변할 때 다음 지침을 따르세요:
+                        
+                        1. 제공된 문서 내용을 기반으로 상세하고 명확한 답변을 제공하세요.
+                        2. 답변은 최소 3-5문장으로 구성하며, 필요한 경우 더 자세한 설명을 제공하세요.
+                        3. 문서에서 답변을 찾을 수 없는 경우, 정직하게 모른다고 말하세요.
+                        4. 답변 시 핵심 개념을 먼저 간략히 설명한 후, 세부 내용을 제공하는 구조로 작성하세요.
+                        5. 가능한 경우 예시나 유사 사례를 포함하여 답변을 강화하세요.
+                        
+                        ## 답변 형식
+                        📍 답변 내용: (상세한 답변을 여기에 작성)
+                        
+                        📍 참고 자료: (사용한 문서의 관련 부분)
+                        
+                        {context}"""
+                        
+                        qa_prompt = ChatPromptTemplate.from_messages(
+                            [
+                                ("system", qa_system_prompt),
+                                MessagesPlaceholder("chat_history"),
+                                ("human", "{input}"),
+                            ]
+                        )
 
-                    # 질문-답변 프롬프트 설정
-                    qa_system_prompt = """당신은 유용하고 상세한 답변을 제공하는 지식이 풍부한 AI 어시스턴트입니다.
-                    사용자 질문에 답변할 때 다음 지침을 따르세요:
-                    
-                    1. 제공된 문서 내용을 기반으로 상세하고 명확한 답변을 제공하세요.
-                    2. 답변은 최소 3-5문장으로 구성하며, 필요한 경우 더 자세한 설명을 제공하세요.
-                    3. 문서에서 답변을 찾을 수 없는 경우, 정직하게 모른다고 말하세요.
-                    4. 답변 시 핵심 개념을 먼저 간략히 설명한 후, 세부 내용을 제공하는 구조로 작성하세요.
-                    5. 가능한 경우 예시나 유사 사례를 포함하여 답변을 강화하세요.
-                    
-                    ## 답변 형식
-                    📍 답변 내용: (상세한 답변을 여기에 작성)
-                    
-                    📍 참고 자료: (사용한 문서의 관련 부분)
-                    
-                    {context}"""
-                    
-                    qa_prompt = ChatPromptTemplate.from_messages(
-                        [
-                            ("system", qa_system_prompt),
-                            MessagesPlaceholder("chat_history"),
-                            ("human", "{input}"),
-                        ]
-                    )
+                        # 문서 체인 생성
+                        question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
 
-                    # 문서 체인 생성
-                    question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
-
-                    # 최종 RAG 체인 생성
-                    rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
-                    
-                    # 세션 상태에 체인 저장
-                    st.session_state.rag_chain = rag_chain
+                        # 최종 RAG 체인 생성
+                        rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
+                        
+                        # 세션 상태에 체인 저장
+                        st.session_state.rag_chain = rag_chain
 
                 st.success("Ready to Chat!")
                 display_pdf(uploaded_file)
