@@ -78,55 +78,10 @@ def display_pdf(file):
     # 파일 포인터 위치 다시 초기화
     file.seek(0)
 
-# 페이지 설정
-st.set_page_config(
-    page_title="PDF 챗봇 어시스턴트",
-    page_icon="📚",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-# CSS 스타일 추가
-st.markdown("""
-    <style>
-    .main {
-        padding: 2rem;
-    }
-    .stApp {
-        background-color: #f5f5f5;
-    }
-    .css-1d391kg {
-        padding: 2rem;
-    }
-    .stSidebar {
-        background-color: #ffffff;
-        padding: 2rem;
-        border-right: 1px solid #e0e0e0;
-    }
-    .uploadedFile {
-        background-color: #ffffff;
-        padding: 1.5rem;
-        border-radius: 10px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    }
-    .chat-container {
-        background-color: #ffffff;
-        padding: 2rem;
-        border-radius: 10px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        margin-top: 2rem;
-    }
-    </style>
-""", unsafe_allow_html=True)
-
 with st.sidebar:
-    st.image("https://raw.githubusercontent.com/streamlit/docs/main/public/logos/streamlit-mark-color.png", width=50)
-    st.title("📚 문서 업로드")
+    st.header(f"Add your documents!")
     
-    with st.container():
-        st.markdown("### 📄 PDF 파일을 업로드하세요")
-        st.markdown("PDF 파일을 업로드하면 AI가 내용을 분석하고 답변해드립니다.")
-        uploaded_file = st.file_uploader("PDF 파일 선택", type="pdf", help="PDF 형식의 파일만 업로드 가능합니다.")
+    uploaded_file = st.file_uploader("Choose your `.pdf` file", type="pdf")
 
     if uploaded_file:
         try:
@@ -235,35 +190,19 @@ with st.sidebar:
             st.error(f"An error occurred: {e}")
             st.stop()     
 
-# 메인 페이지 구성
-st.title("🤖 AI PDF 챗봇 어시스턴트")
-st.markdown("""
-    <div style='background-color: #f0f8ff; padding: 1rem; border-radius: 10px; margin-bottom: 2rem;'>
-        <h4>👋 환영합니다!</h4>
-        <p>PDF 문서를 업로드하고 AI와 대화해보세요. 문서 내용에 대해 질문하면 상세한 답변을 제공해드립니다.</p>
-    </div>
-""", unsafe_allow_html=True)
+# 웹사이트 제목
+st.title("Llama 3.2 LLM Chatbot")
 
-# 채팅 인터페이스
-st.markdown("<div class='chat-container'>", unsafe_allow_html=True)
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# 대화 내용 표시
+# 대화 내용을 기록하기 위해 셋업
 for message in st.session_state.messages:
-    with st.chat_message(message["role"], avatar="🧑‍💻" if message["role"] == "user" else "🤖"):
+    with st.chat_message(message["role"]):
         st.markdown(message["content"])
-
+        
 # 프롬프트 비용이 너무 많이 소요되는 것을 방지하기 위해
 MAX_MESSAGES_BEFORE_DELETION = 4
-
-# 입력 프롬프트 스타일링
-if uploaded_file:
-    st.markdown("<div style='padding: 1rem 0;'>", unsafe_allow_html=True)
-    prompt = st.chat_input("💭 질문을 입력하세요...")
-else:
-    st.info("👈 먼저 왼쪽 사이드바에서 PDF 파일을 업로드해주세요.")
-st.markdown("</div>", unsafe_allow_html=True)
 
 # 웹사이트에서 유저의 인풋을 받고 위에서 만든 AI 에이전트 실행시켜서 답변 받기
 if prompt := st.chat_input("Ask a question!"):
