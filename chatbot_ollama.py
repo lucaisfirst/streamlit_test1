@@ -7,19 +7,26 @@ import tempfile
 import io
 import numpy as np
 from PIL import Image
-from langchain_community.llms import Ollama
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores import FAISS
-from langchain_community.embeddings import OllamaEmbeddings
-from langchain_community.document_loaders import PyPDFLoader
 from langchain.prompts import ChatPromptTemplate
 from langchain.schema.runnable import RunnablePassthrough
 from langchain.schema.output_parser import StrOutputParser
 from langchain.chains.combine_documents import create_stuff_documents_chain
 
+# 대시보드 기능 가져오기
+try:
+    from correction_dashboard import render_document_correction_dashboard
+except ImportError:
+    st.error("correction_dashboard.py 파일이 필요합니다.")
+
+# 환경 변수 설정 - 스트림릿 클라우드 배포 지원
+OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "https://ollama-api-service.onrender.com")
+OLLAMA_EMBED_MODEL = os.environ.get("OLLAMA_EMBED_MODEL", "llama3")
+OLLAMA_CHAT_MODEL = os.environ.get("OLLAMA_CHAT_MODEL", "llama3")
+
 # 페이지 설정 - 모바일 호환성 개선
 st.set_page_config(
-    page_title="PDF Chatbot",
+    page_title="AI 문서 도우미",
     page_icon="📚",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -62,7 +69,7 @@ try:
 except ImportError as e:
     st.error(f"필요한 라이브러리가 설치되지 않았습니다: {str(e)}")
     st.warning("다음 명령어로 필요한 라이브러리를 설치하세요:")
-    st.code("pip install langchain langchain-community pypdf streamlit", language="bash")
+    st.code("pip install langchain langchain-community pypdf streamlit faiss-cpu pandas plotly", language="bash")
     st.stop()
 
 if "id" not in st.session_state:
@@ -71,13 +78,6 @@ if "id" not in st.session_state:
 
 session_id = st.session_state.id
 client = None
-
-# Ollama 서버 URL 설정 (기본값: localhost:11434)
-OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
-
-# Ollama 모델 설정
-OLLAMA_EMBED_MODEL = os.environ.get("OLLAMA_EMBED_MODEL", "llama3")
-OLLAMA_CHAT_MODEL = os.environ.get("OLLAMA_CHAT_MODEL", "llama3")
 
 def reset_chat():
     st.session_state.messages = []
@@ -127,223 +127,256 @@ def display_pdf(file):
 # 기본 Ollama LLM 설정 (파일 업로드 없이도 사용 가능)
 def initialize_basic_llm():
     if "basic_llm" not in st.session_state:
-        st.session_state.basic_llm = Ollama(
-            base_url=OLLAMA_BASE_URL,
-            model=OLLAMA_CHAT_MODEL,
-            temperature=0.7,
-            num_predict=512,
-            stop=["<|im_end|>"],
-            repeat_penalty=1.1,
-            top_k=40,
-            top_p=0.9
-        )
+        try:
+            st.session_state.basic_llm = Ollama(
+                base_url=OLLAMA_BASE_URL,
+                model=OLLAMA_CHAT_MODEL,
+                temperature=0.7,
+                num_predict=512,
+                stop=["<|im_end|>"],
+                repeat_penalty=1.1,
+                top_k=40,
+                top_p=0.9
+            )
+        except Exception as e:
+            st.error(f"LLM 초기화 중 오류 발생: {e}")
+            st.warning("Ollama 서버 연결을 확인하세요.")
     return st.session_state.basic_llm
 
-# 사이드바 구성 - 모바일 환경 지원 추가
-with st.sidebar:
-    st.header(f"Chatbot Options")
-    
-    # 채팅 초기화 버튼 추가
-    if st.button("Reset Chat"):
-        reset_chat()
-        st.success("Chat history has been reset.")
-    
-    st.markdown("---")
-    
-    # PDF 업로드 섹션 (선택 사항)
-    st.header("Optional: Add PDF Document")
-    st.write("Upload a PDF to enable document-based Q&A")
-    
-    # 모바일 환경을 위한 설명 추가
-    uploaded_file = st.file_uploader("Choose your `.pdf` file (optional)", type="pdf")
-    
-    if uploaded_file:
-        try:
-            file_key = f"{session_id}-{uploaded_file.name}"
+# PDF 챗봇 기능 렌더링
+def render_pdf_chatbot():
+    # 기본 LLM 초기화 (파일 업로드 없이도 사용 가능)
+    initialize_basic_llm()
 
-            with tempfile.TemporaryDirectory() as temp_dir:
-                file_path = os.path.join(temp_dir, uploaded_file.name)
+    # 웹사이트 제목
+    st.title("Ollama LLM Chatbot")
+
+    # 모드 표시
+    if "rag_chain" in st.session_state:
+        st.info("📄 Document Q&A mode: Ask questions about the uploaded PDF")
+    else:
+        st.info("💬 General chat mode: Ask me anything!")
+
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+
+    # 대화 내용을 기록하기 위해 셋업
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+            
+    # 프롬프트 비용이 너무 많이 소요되는 것을 방지하기 위해
+    MAX_MESSAGES_BEFORE_DELETION = 4
+
+    # 웹사이트에서 유저의 인풋을 받고 위에서 만든 AI 에이전트 실행시켜서 답변 받기
+    if prompt := st.chat_input("Ask a question!"):
+        
+        # 유저가 보낸 질문이면 유저 아이콘과 질문 보여주기
+        # 만약 현재 저장된 대화 내용 기록이 4개보다 많으면 자르기
+        if len(st.session_state.messages) >= MAX_MESSAGES_BEFORE_DELETION:
+            # Remove the first two messages
+            del st.session_state.messages[0]
+            del st.session_state.messages[0]  
+       
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
+        # AI가 보낸 답변이면 AI 아이콘이랑 LLM 실행시켜서 답변 받고 스트리밍해서 보여주기
+        with st.chat_message("assistant"):
+            message_placeholder = st.empty()
+            full_response = ""
+            
+            try:
+                if "rag_chain" in st.session_state:
+                    # RAG 체인 사용 (PDF 업로드된 경우)
+                    result = st.session_state.rag_chain.invoke({"input": prompt, "chat_history": st.session_state.messages})
+
+                    # 증거자료 보여주기
+                    with st.expander("Evidence context"):
+                        st.write(result["context"])
+
+                    # 답변 표시 (스트리밍 효과)
+                    for chunk in result["answer"].split(" "):
+                        full_response += chunk + " "
+                        time.sleep(0.05)  # 스트리밍 속도 조정 (Ollama가 더 빠를 수 있음)
+                        message_placeholder.markdown(full_response + "▌")
+                        message_placeholder.markdown(full_response)
+                else:
+                    # 기본 LLM 사용 (PDF 업로드 없는 경우)
+                    basic_llm = st.session_state.basic_llm
+                    
+                    # 기본 프롬프트 설정
+                    basic_prompt = ChatPromptTemplate.from_messages([
+                        ("system", "당신은 유용하고 상세한 답변을 제공하는 지식이 풍부한 AI 어시스턴트입니다. 사용자의 질문에 친절하고 정확하게 답변해 주세요."),
+                        MessagesPlaceholder("chat_history"),
+                        ("human", "{input}")
+                    ])
+                    
+                    # 채팅 체인 생성
+                    chat_history = [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages]
+                    
+                    # 응답 생성
+                    response = basic_llm.invoke(prompt)
+                    
+                    # 답변 표시 (스트리밍 효과)
+                    for chunk in response.split(" "):
+                        full_response += chunk + " "
+                        time.sleep(0.05)
+                        message_placeholder.markdown(full_response + "▌")
+                        message_placeholder.markdown(full_response)
+            except Exception as e:
+                error_message = f"오류가 발생했습니다: {str(e)}"
+                message_placeholder.error(error_message)
+                full_response = error_message
                 
-                with open(file_path, "wb") as f:
-                    f.write(uploaded_file.getvalue())
-                
-                file_key = f"{session_id}-{uploaded_file.name}"
-                st.write("Indexing your document...")
-                
-                # 인덱싱 과정에 로딩 상태 표시
-                with st.spinner("Processing document..."):
-                    if file_key not in st.session_state.get('file_cache', {}):
-                        if os.path.exists(temp_dir):
-                            loader = PyPDFLoader(file_path)
-                        else:    
-                            st.error('Could not find the file you uploaded, please check again...')
-                            st.stop()
-                        
-                        pages = loader.load_and_split()
-                        
-                        # Ollama 임베딩 모델 사용
-                        embeddings = OllamaEmbeddings(
-                            base_url=OLLAMA_BASE_URL,
-                            model=OLLAMA_EMBED_MODEL
-                        )
-                        
-                        # FAISS 벡터 저장소 생성 (Chroma 대신 사용)
-                        vectorstore = FAISS.from_documents(
-                            documents=pages,
-                            embedding=embeddings
-                        )
-                        
-                        # 검색기 설정
-                        retriever = vectorstore.as_retriever(search_kwargs={"k": 2})
-                        
-                        # Ollama LLM 설정 (매개변수 추가)
-                        llm = Ollama(
-                            base_url=OLLAMA_BASE_URL,
-                            model=OLLAMA_CHAT_MODEL,
-                            temperature=0.7,  # 약간의 창의성 허용
-                            num_predict=512,  # 생성할 최대 토큰 수 증가
-                            stop=["<|im_end|>"],  # 적절한 중단 토큰 설정
-                            repeat_penalty=1.1,  # 반복 방지
-                            top_k=40,  # 다양한 단어 선택 허용
-                            top_p=0.9  # 다양성 확보
-                        )
-                        
-                        # 컨텍스트화 프롬프트 설정
-                        contextualize_q_system_prompt = """이전 대화 내용과 최신 사용자 질문이 있을 때, 이 질문이 이전 대화 내용과 관련이 있을 수 있습니다. 
-                        이런 경우, 대화 내용을 알 필요 없이 독립적으로 이해할 수 있는 질문으로 바꾸세요. 
-                        질문에 답할 필요는 없고, 필요하다면 그저 다시 구성하거나 그대로 두세요."""
+        st.session_state.messages.append({"role": "assistant", "content": full_response})
 
-                        contextualize_q_prompt = ChatPromptTemplate.from_messages(
-                            [
-                                ("system", contextualize_q_system_prompt),
-                                MessagesPlaceholder("chat_history"),
-                                ("human", "{input}"),
-                            ]
-                        )
+# 메인 애플리케이션 실행
+def main():
+    # 사이드바 구성 - 모바일 환경 지원 추가
+    with st.sidebar:
+        st.header("메뉴")
+        
+        # 페이지 선택 옵션
+        page = st.radio(
+            "기능 선택",
+            ["PDF 챗봇", "문서교정 대시보드"]
+        )
+        
+        st.markdown("---")
+        
+        if page == "PDF 챗봇":
+            st.header(f"Chatbot Options")
+            
+            # 채팅 초기화 버튼 추가
+            if st.button("Reset Chat"):
+                reset_chat()
+                st.success("Chat history has been reset.")
+            
+            st.markdown("---")
+            
+            # PDF 업로드 섹션 (선택 사항)
+            st.header("Optional: Add PDF Document")
+            st.write("Upload a PDF to enable document-based Q&A")
+            
+            # 모바일 환경을 위한 설명 추가
+            uploaded_file = st.file_uploader("Choose your `.pdf` file (optional)", type="pdf")
+            
+            if uploaded_file:
+                try:
+                    file_key = f"{session_id}-{uploaded_file.name}"
 
-                        # 대화 기록을 인식하는 검색기 생성
-                        history_aware_retriever = create_history_aware_retriever(
-                            llm, retriever, contextualize_q_prompt
-                        )
+                    with tempfile.TemporaryDirectory() as temp_dir:
+                        file_path = os.path.join(temp_dir, uploaded_file.name)
+                        
+                        with open(file_path, "wb") as f:
+                            f.write(uploaded_file.getvalue())
+                        
+                        file_key = f"{session_id}-{uploaded_file.name}"
+                        st.write("Indexing your document...")
+                        
+                        # 인덱싱 과정에 로딩 상태 표시
+                        with st.spinner("Processing document..."):
+                            if file_key not in st.session_state.get('file_cache', {}):
+                                if os.path.exists(temp_dir):
+                                    loader = PyPDFLoader(file_path)
+                                else:    
+                                    st.error('Could not find the file you uploaded, please check again...')
+                                    st.stop()
+                                
+                                pages = loader.load_and_split()
+                                
+                                # Ollama 임베딩 모델 사용
+                                embeddings = OllamaEmbeddings(
+                                    base_url=OLLAMA_BASE_URL,
+                                    model=OLLAMA_EMBED_MODEL
+                                )
+                                
+                                # FAISS 벡터 저장소 생성 (Chroma 대신 사용)
+                                vectorstore = FAISS.from_documents(
+                                    documents=pages,
+                                    embedding=embeddings
+                                )
+                                
+                                # 검색기 설정
+                                retriever = vectorstore.as_retriever(search_kwargs={"k": 2})
+                                
+                                # Ollama LLM 설정 (매개변수 추가)
+                                llm = Ollama(
+                                    base_url=OLLAMA_BASE_URL,
+                                    model=OLLAMA_CHAT_MODEL,
+                                    temperature=0.7,  # 약간의 창의성 허용
+                                    num_predict=512,  # 생성할 최대 토큰 수 증가
+                                    stop=["<|im_end|>"],  # 적절한 중단 토큰 설정
+                                    repeat_penalty=1.1,  # 반복 방지
+                                    top_k=40,  # 다양한 단어 선택 허용
+                                    top_p=0.9  # 다양성 확보
+                                )
+                                
+                                # 컨텍스트화 프롬프트 설정
+                                contextualize_q_system_prompt = """이전 대화 내용과 최신 사용자 질문이 있을 때, 이 질문이 이전 대화 내용과 관련이 있을 수 있습니다. 
+                                이런 경우, 대화 내용을 알 필요 없이 독립적으로 이해할 수 있는 질문으로 바꾸세요. 
+                                질문에 답할 필요는 없고, 필요하다면 그저 다시 구성하거나 그대로 두세요."""
 
-                        # 질문-답변 프롬프트 설정
-                        qa_system_prompt = """당신은 유용하고 상세한 답변을 제공하는 지식이 풍부한 AI 어시스턴트입니다.
-                        사용자 질문에 답변할 때 다음 지침을 따르세요:
-                        
-                        1. 제공된 문서 내용을 기반으로 상세하고 명확한 답변을 제공하세요.
-                        2. 답변은 최소 3-5문장으로 구성하며, 필요한 경우 더 자세한 설명을 제공하세요.
-                        3. 문서에서 답변을 찾을 수 없는 경우, 정직하게 모른다고 말하세요.
-                        4. 답변 시 핵심 개념을 먼저 간략히 설명한 후, 세부 내용을 제공하는 구조로 작성하세요.
-                        5. 가능한 경우 예시나 유사 사례를 포함하여 답변을 강화하세요.
-                        
-                        ## 답변 형식
-                        📍 답변 내용: (상세한 답변을 여기에 작성)
-                        
-                        📍 참고 자료: (사용한 문서의 관련 부분)
-                        
-                        {context}"""
-                        
-                        qa_prompt = ChatPromptTemplate.from_messages(
-                            [
-                                ("system", qa_system_prompt),
-                                MessagesPlaceholder("chat_history"),
-                                ("human", "{input}"),
-                            ]
-                        )
+                                contextualize_q_prompt = ChatPromptTemplate.from_messages(
+                                    [
+                                        ("system", contextualize_q_system_prompt),
+                                        MessagesPlaceholder("chat_history"),
+                                        ("human", "{input}"),
+                                    ]
+                                )
 
-                        # 문서 체인 생성
-                        question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
+                                # 대화 기록을 인식하는 검색기 생성
+                                history_aware_retriever = create_history_aware_retriever(
+                                    llm, retriever, contextualize_q_prompt
+                                )
 
-                        # 최종 RAG 체인 생성
-                        rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
-                        
-                        # 세션 상태에 체인 저장
-                        st.session_state.rag_chain = rag_chain
+                                # 질문-답변 프롬프트 설정
+                                qa_system_prompt = """당신은 유용하고 상세한 답변을 제공하는 지식이 풍부한 AI 어시스턴트입니다.
+                                사용자 질문에 답변할 때 다음 지침을 따르세요:
+                                
+                                1. 제공된 문서 내용을 기반으로 상세하고 명확한 답변을 제공하세요.
+                                2. 답변은 최소 3-5문장으로 구성하며, 필요한 경우 더 자세한 설명을 제공하세요.
+                                3. 문서에서 답변을 찾을 수 없는 경우, 정직하게 모른다고 말하세요.
+                                4. 답변 시 핵심 개념을 먼저 간략히 설명한 후, 세부 내용을 제공하는 구조로 작성하세요.
+                                5. 가능한 경우 예시나 유사 사례를 포함하여 답변을 강화하세요.
+                                
+                                ## 답변 형식
+                                📍 답변 내용: (상세한 답변을 여기에 작성)
+                                
+                                📍 참고 자료: (사용한 문서의 관련 부분)
+                                
+                                {context}"""
+                                
+                                qa_prompt = ChatPromptTemplate.from_messages(
+                                    [
+                                        ("system", qa_system_prompt),
+                                        MessagesPlaceholder("chat_history"),
+                                        ("human", "{input}"),
+                                    ]
+                                )
+
+                                # 문서 체인 생성
+                                question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
+
+                                # 최종 RAG 체인 생성
+                                rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
+                                
+                                # 세션 상태에 체인 저장
+                                st.session_state.rag_chain = rag_chain
 
                 st.success("PDF loaded successfully! You can now ask questions about the document.")
                 display_pdf(uploaded_file)
         except Exception as e:
             st.error(f"An error occurred: {e}")
-            st.stop()     
+            st.stop()
 
-# 기본 LLM 초기화 (파일 업로드 없이도 사용 가능)
-initialize_basic_llm()
-
-# 웹사이트 제목
-st.title("Ollama LLM Chatbot")
-
-# 모드 표시
-if "rag_chain" in st.session_state:
-    st.info("📄 Document Q&A mode: Ask questions about the uploaded PDF")
-else:
-    st.info("💬 General chat mode: Ask me anything!")
-
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-
-# 대화 내용을 기록하기 위해 셋업
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
-        
-# 프롬프트 비용이 너무 많이 소요되는 것을 방지하기 위해
-MAX_MESSAGES_BEFORE_DELETION = 4
-
-# 웹사이트에서 유저의 인풋을 받고 위에서 만든 AI 에이전트 실행시켜서 답변 받기
-if prompt := st.chat_input("Ask a question!"):
-    
-    # 유저가 보낸 질문이면 유저 아이콘과 질문 보여주기
-    # 만약 현재 저장된 대화 내용 기록이 4개보다 많으면 자르기
-    if len(st.session_state.messages) >= MAX_MESSAGES_BEFORE_DELETION:
-        # Remove the first two messages
-        del st.session_state.messages[0]
-        del st.session_state.messages[0]  
-   
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
-
-    # AI가 보낸 답변이면 AI 아이콘이랑 LLM 실행시켜서 답변 받고 스트리밍해서 보여주기
-    with st.chat_message("assistant"):
-        message_placeholder = st.empty()
-        full_response = ""
-        
-        if "rag_chain" in st.session_state:
-            # RAG 체인 사용 (PDF 업로드된 경우)
-            result = st.session_state.rag_chain.invoke({"input": prompt, "chat_history": st.session_state.messages})
-
-            # 증거자료 보여주기
-            with st.expander("Evidence context"):
-                st.write(result["context"])
-
-            # 답변 표시 (스트리밍 효과)
-            for chunk in result["answer"].split(" "):
-                full_response += chunk + " "
-                time.sleep(0.05)  # 스트리밍 속도 조정 (Ollama가 더 빠를 수 있음)
-                message_placeholder.markdown(full_response + "▌")
-                message_placeholder.markdown(full_response)
-        else:
-            # 기본 LLM 사용 (PDF 업로드 없는 경우)
-            basic_llm = st.session_state.basic_llm
-            
-            # 기본 프롬프트 설정
-            basic_prompt = ChatPromptTemplate.from_messages([
-                ("system", "당신은 유용하고 상세한 답변을 제공하는 지식이 풍부한 AI 어시스턴트입니다. 사용자의 질문에 친절하고 정확하게 답변해 주세요."),
-                MessagesPlaceholder("chat_history"),
-                ("human", "{input}")
-            ])
-            
-            # 채팅 체인 생성
-            chat_history = [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages]
-            
-            # 응답 생성
-            response = basic_llm.invoke(prompt)
-            
-            # 답변 표시 (스트리밍 효과)
-            for chunk in response.split(" "):
-                full_response += chunk + " "
-                time.sleep(0.05)
-                message_placeholder.markdown(full_response + "▌")
-                message_placeholder.markdown(full_response)
-            
-    st.session_state.messages.append({"role": "assistant", "content": full_response})
+# 독립 실행을 위한 코드 (테스트용)
+if __name__ == "__main__":
+    st.set_page_config(
+        page_title="문서교정 대시보드",
+        page_icon="📊",
+        layout="wide"
+    )
+    render_document_correction_dashboard()
