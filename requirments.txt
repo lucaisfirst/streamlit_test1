@@ -1,8 +1,0 @@
-streamlit
-pymupdf
-pillow
-requests
-numpy
-langchain>=0.1.0
-langchain-community>=0.0.16
-faiss-cpu
