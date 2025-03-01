@@ -163,10 +163,14 @@ try:
     # 로컬 개발 환경에서는 .streamlit/secrets.toml 파일에서 가져옴
     GROK_API_KEY = st.secrets["api_keys"]["GROK_API_KEY"]
     OPENAI_API_KEY = st.secrets["api_keys"]["OPENAI_API_KEY"]
-except Exception:
+    
+    # API 키 디버깅 정보 (개발 중에만 사용)
+    st.sidebar.info(f"Grok API 키 로드됨: {GROK_API_KEY[:5]}...")
+except Exception as e:
     # 시크릿이 없는 경우 환경 변수에서 가져옴
     GROK_API_KEY = os.environ.get("GROK_API_KEY", "")
     OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+    st.sidebar.warning(f"시크릿 파일에서 API 키를 로드하는 중 오류 발생: {str(e)}")
 
 # API 키가 없는 경우 경고 표시
 if not GROK_API_KEY:
@@ -219,13 +223,14 @@ def display_pdf(file):
 
 # LLM 초기화 함수
 def initialize_basic_llm():
-    if "basic_llm" not in st.session_state:
+    if "basic_llm" not in st.session_state or st.session_state.get("last_grok_key") != GROK_API_KEY:
         try:
             st.session_state.basic_llm = GrokChatModel(
                 api_key=GROK_API_KEY,
                 temperature=0.7,
                 max_tokens=1024
             )
+            st.session_state.last_grok_key = GROK_API_KEY
         except Exception as e:
             st.error(f"Grok API 연결 오류: {str(e)}")
             return None
@@ -248,6 +253,11 @@ def get_embeddings_model():
 with st.sidebar:
     st.header(f"Chatbot Options")
     
+    # Grok API 키 입력 추가
+    grok_api_key = st.text_input("Grok API Key", value=GROK_API_KEY, type="password")
+    if grok_api_key:
+        GROK_API_KEY = grok_api_key
+    
     # OpenAI API 키 입력 (임베딩용)
     openai_api_key = st.text_input("OpenAI API Key (임베딩용)", value=OPENAI_API_KEY, type="password")
     if openai_api_key:
@@ -258,6 +268,12 @@ with st.sidebar:
     if st.button("Reset Chat"):
         reset_chat()
         st.success("Chat history has been reset.")
+        
+        # API 키가 변경된 경우 LLM 재초기화
+        if "basic_llm" in st.session_state:
+            del st.session_state.basic_llm
+            llm = initialize_basic_llm()
+            st.success("LLM이 재초기화되었습니다.")
     
     st.markdown("---")
     
