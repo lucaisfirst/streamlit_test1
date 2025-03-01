@@ -158,14 +158,19 @@ if "id" not in st.session_state:
 session_id = st.session_state.id
 client = None
 
-# 환경 설정
-GROK_API_KEY = os.environ.get("GROK_API_KEY", "xai-BZDTPNCSBayfE5PKA7dStIN0mK19IJtmpdiCch9aIWQFNZZKj6WZyBzM8ss9OBZBIPBzisnBDT5nQRgK")
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+# 환경 설정 - 시크릿에서 API 키 가져오기
+try:
+    # 로컬 개발 환경에서는 .streamlit/secrets.toml 파일에서 가져옴
+    GROK_API_KEY = st.secrets["api_keys"]["GROK_API_KEY"]
+    OPENAI_API_KEY = st.secrets["api_keys"]["OPENAI_API_KEY"]
+except Exception:
+    # 시크릿이 없는 경우 환경 변수에서 가져옴
+    GROK_API_KEY = os.environ.get("GROK_API_KEY", "")
+    OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 
-# 배포 환경에서 API 키 설정
-if not OPENAI_API_KEY and os.environ.get("IS_CLOUD_ENV", "").lower() == "true":
-    # 배포 환경에서는 환경 변수에서 API 키를 가져옵니다
-    OPENAI_API_KEY = "임베딩용_OPENAI_API_키_환경변수에서_설정"
+# API 키가 없는 경우 경고 표시
+if not GROK_API_KEY:
+    st.warning("Grok API 키가 설정되지 않았습니다. 챗봇 기능이 제한됩니다.")
 
 def reset_chat():
     st.session_state.messages = []
