@@ -5,15 +5,11 @@ import base64
 import uuid
 import tempfile
 import io
+import numpy as np
+from PIL import Image
 
-# 기본 라이브러리들 정상 임포트 확인
+# fitz 라이브러리(PyMuPDF) 관련 코드를 제거하고 기본 PDF 표시 방식 사용
 try:
-    import numpy as np
-    from PIL import Image
-    import requests
-    import fitz  # PyMuPDF
-    
-    # 랭체인 관련 라이브러리
     from langchain_community.embeddings import OllamaEmbeddings
     from langchain_community.vectorstores import FAISS
     from langchain_community.document_loaders import PyPDFLoader
@@ -25,7 +21,7 @@ try:
 except ImportError as e:
     st.error(f"필요한 라이브러리가 설치되지 않았습니다: {str(e)}")
     st.warning("다음 명령어로 필요한 라이브러리를 설치하세요:")
-    st.code("pip install pymupdf pillow requests numpy langchain langchain-community faiss-cpu", language="bash")
+    st.code("pip install langchain langchain-community faiss-cpu", language="bash")
     st.stop()
 
 if "id" not in st.session_state:
@@ -47,7 +43,7 @@ def reset_chat():
     st.session_state.context = None
 
 def display_pdf(file):
-    """PDF 파일의 첫 페이지를 이미지로 변환하여 표시합니다."""
+    """PDF 파일을 base64로 인코딩하여 iframe으로 표시합니다."""
     try:
         # 파일 포인터 위치 초기화
         file.seek(0)
@@ -55,38 +51,17 @@ def display_pdf(file):
         # 파일 데이터를 읽어옴
         file_data = file.read()
         
-        # PDF 파일 처리를 위한 임시 경로
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
-            temp_file.write(file_data)
-            temp_path = temp_file.name
-        
-        # PyMuPDF를 사용하여 PDF 열기
-        pdf_document = fitz.open(temp_path)
-        
+        # base64로 인코딩하여 iframe으로 표시
+        base64_pdf = base64.b64encode(file_data).decode('utf-8')
+        pdf_display = f'''
+            <iframe src="data:application/pdf;base64,{base64_pdf}" 
+                    width="700"
+                    height="800"
+                    type="application/pdf">
+            </iframe>
+        '''
         st.markdown("### PDF 미리보기")
-        
-        # 각 페이지를 이미지로 변환하여 표시 (최대 3페이지)
-        max_pages = min(3, len(pdf_document))
-        
-        for page_num in range(max_pages):
-            page = pdf_document[page_num]
-            
-            # 페이지를 이미지로 렌더링 (해상도 향상)
-            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
-            
-            # 이미지 데이터를 PIL 이미지로 변환
-            img_data = pix.tobytes("png")
-            img = Image.open(io.BytesIO(img_data))
-            
-            # 이미지 표시
-            st.image(img, caption=f"페이지 {page_num + 1}/{len(pdf_document)}", use_column_width=True)
-        
-        if len(pdf_document) > 3:
-            st.info(f"전체 {len(pdf_document)}페이지 중 처음 3페이지만 표시됩니다.")
-        
-        # 파일 닫기 및 임시 파일 삭제
-        pdf_document.close()
-        os.unlink(temp_path)
+        st.markdown(pdf_display, unsafe_allow_html=True)
         
         # 원본 파일 다운로드 버튼 제공
         file.seek(0)
@@ -98,22 +73,7 @@ def display_pdf(file):
         )
         
     except Exception as e:
-        st.error(f"PDF 미리보기 생성 중 오류가 발생했습니다: {e}")
-        
-        # 오류 발생 시 기본 iframe 방식으로 표시 시도
-        try:
-            file.seek(0)
-            base64_pdf = base64.b64encode(file.read()).decode('utf-8')
-            pdf_display = f'''
-                <iframe src="data:application/pdf;base64,{base64_pdf}" 
-                        width="700"
-                        height="800"
-                        type="application/pdf">
-                </iframe>
-            '''
-            st.markdown(pdf_display, unsafe_allow_html=True)
-        except:
-            st.error("PDF 표시에 실패했습니다.")
+        st.error(f"PDF 표시 중 오류가 발생했습니다: {e}")
     
     # 파일 포인터 위치 다시 초기화
     file.seek(0)
