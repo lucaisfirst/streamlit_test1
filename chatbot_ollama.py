@@ -7,10 +7,10 @@ import tempfile
 import io
 import numpy as np
 from PIL import Image
-from langchain_community.llms.ollama import Ollama
+from langchain.llms import OpenAI
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores.faiss import FAISS
-from langchain_community.embeddings.ollama import OllamaEmbeddings
+from langchain_community.vectorstores import FAISS
+from langchain_community.embeddings import OpenAIEmbeddings
 from langchain_community.document_loaders import PyPDFLoader
 from langchain.prompts import ChatPromptTemplate
 from langchain.schema.runnable import RunnablePassthrough
@@ -49,12 +49,12 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# fitz 라이브러리(PyMuPDF) 관련 코드를 제거하고 기본 PDF 표시 방식 사용
+# 필요한 라이브러리 임포트 확인
 try:
-    from langchain_community.embeddings import OllamaEmbeddings
+    from langchain_community.embeddings import OpenAIEmbeddings
     from langchain_community.vectorstores import FAISS
     from langchain_community.document_loaders import PyPDFLoader
-    from langchain_community.llms import Ollama
+    from langchain.llms import OpenAI
     from langchain_core.messages import HumanMessage, SystemMessage
     from langchain.chains import create_history_aware_retriever, create_retrieval_chain
     from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -62,7 +62,7 @@ try:
 except ImportError as e:
     st.error(f"필요한 라이브러리가 설치되지 않았습니다: {str(e)}")
     st.warning("다음 명령어로 필요한 라이브러리를 설치하세요:")
-    st.code("pip install langchain langchain-community faiss-cpu streamlit", language="bash")
+    st.code("pip install langchain langchain-community openai pypdf streamlit", language="bash")
     st.stop()
 
 if "id" not in st.session_state:
@@ -72,12 +72,18 @@ if "id" not in st.session_state:
 session_id = st.session_state.id
 client = None
 
-# Ollama 서버 URL 설정 (기본값: localhost:11434)
-OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+# OpenAI API 키 설정
+openai_api_key = os.environ.get("OPENAI_API_KEY", "")
+if not openai_api_key:
+    openai_api_key = st.sidebar.text_input("OpenAI API 키를 입력하세요", type="password")
+    if not openai_api_key:
+        st.warning("OpenAI API 키가 필요합니다.")
+        st.stop()
+os.environ["OPENAI_API_KEY"] = openai_api_key
 
-# Ollama 모델 설정
-OLLAMA_EMBED_MODEL = os.environ.get("OLLAMA_EMBED_MODEL", "llama3.2")
-OLLAMA_CHAT_MODEL = os.environ.get("OLLAMA_CHAT_MODEL", "llama3.2")
+# 모델 설정
+EMBED_MODEL = "text-embedding-ada-002"
+CHAT_MODEL = "gpt-3.5-turbo"
 
 def reset_chat():
     st.session_state.messages = []
@@ -127,11 +133,10 @@ def display_pdf(file):
 # 기본 Ollama LLM 설정 (파일 업로드 없이도 사용 가능)
 def initialize_basic_llm():
     if "basic_llm" not in st.session_state:
-        st.session_state.basic_llm = Ollama(
-            base_url=OLLAMA_BASE_URL,
-            model=OLLAMA_CHAT_MODEL,
+        st.session_state.basic_llm = OpenAI(
+            model=CHAT_MODEL,
             temperature=0.7,
-            num_predict=512,
+            max_tokens=512,
             stop=["<|im_end|>"],
             repeat_penalty=1.1,
             top_k=40,
@@ -182,9 +187,8 @@ with st.sidebar:
                         pages = loader.load_and_split()
                         
                         # Ollama 임베딩 모델 사용
-                        embeddings = OllamaEmbeddings(
-                            base_url=OLLAMA_BASE_URL,
-                            model=OLLAMA_EMBED_MODEL
+                        embeddings = OpenAIEmbeddings(
+                            model=EMBED_MODEL
                         )
                         
                         # FAISS 벡터 저장소 생성 (Chroma 대신 사용)
@@ -197,11 +201,10 @@ with st.sidebar:
                         retriever = vectorstore.as_retriever(search_kwargs={"k": 2})
                         
                         # Ollama LLM 설정 (매개변수 추가)
-                        llm = Ollama(
-                            base_url=OLLAMA_BASE_URL,
-                            model=OLLAMA_CHAT_MODEL,
+                        llm = OpenAI(
+                            model=CHAT_MODEL,
                             temperature=0.7,  # 약간의 창의성 허용
-                            num_predict=512,  # 생성할 최대 토큰 수 증가
+                            max_tokens=512,  # 생성할 최대 토큰 수 증가
                             stop=["<|im_end|>"],  # 적절한 중단 토큰 설정
                             repeat_penalty=1.1,  # 반복 방지
                             top_k=40,  # 다양한 단어 선택 허용
