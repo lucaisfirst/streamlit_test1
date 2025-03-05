@@ -31,9 +31,9 @@ try:
 except ImportError:
     st.error("correction_dashboard.py 파일이 필요합니다.")
 
-# 페이지 설정 - 모바일 호환성 개선
+# 페이지 설정 - 타이틀 변경
 st.set_page_config(
-    page_title="AI 문서 도우미",
+    page_title="문서교정 AI Agent by Refinery",  # 여기를 변경
     page_icon="📚",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -571,14 +571,85 @@ def save_correction_history(file_name, correction_type, errors_found, correction
     st.session_state.correction_history.append(history_item)
     return history_item
 
-# 문서교정 대시보드 기능
+# 문서교정 대시보드 기능 개선
 def render_document_correction_dashboard():
     st.markdown('<h1 style="text-align: center; margin-bottom: 2rem;">문서교정 통계 대시보드</h1>', unsafe_allow_html=True)
+    
+    # 탭 스타일 개선
+    st.markdown("""
+    <style>
+        /* 전체 대시보드 컨테이너 */
+        .dashboard-container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        /* 탭 컨테이너 정렬 */
+        .stTabs [data-baseweb="tab-list"] {
+            gap: 0;
+            background-color: #f8fafc;
+            border-radius: 8px;
+            padding: 0.5rem;
+            justify-content: center;
+            margin-bottom: 1.5rem;
+        }
+        
+        /* 탭 버튼 스타일 */
+        .stTabs [data-baseweb="tab"] {
+            padding: 0.8rem 1.5rem;
+            margin: 0 0.25rem;
+            border-radius: 6px;
+        }
+        
+        /* 메트릭 카드 그리드 */
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+        
+        /* 메트릭 카드 */
+        .metric-card {
+            background-color: white;
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+            text-align: center;
+            height: 100%;
+            min-height: 140px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+        
+        /* 차트 컨테이너 */
+        .chart-container {
+            background-color: white;
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+            margin-bottom: 1.5rem;
+            height: 100%;
+        }
+        
+        /* 차트 제목 */
+        .chart-title {
+            font-weight: 600;
+            font-size: 1.1rem;
+            margin-bottom: 1rem;
+            color: #1e293b;
+        }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    # 대시보드 컨테이너 시작
+    st.markdown('<div class="dashboard-container">', unsafe_allow_html=True)
     
     # 탭 생성으로 다양한 뷰 제공
     tabs = st.tabs(["📊 교정 현황 개요", "📈 상세 분석", "🖼️ 교정 히스토리 갤러리"])
     
-    # 샘플 데이터 생성
+    # 샘플 데이터 생성 함수는 그대로 유지
     def generate_sample_data():
         doc_types = ["계약서", "보고서", "제안서", "매뉴얼", "정책문서", "회의록", "법률문서", "기술문서"]
         dates = [(datetime.now() - timedelta(days=x)).strftime('%Y-%m-%d') for x in range(30)]
@@ -614,97 +685,72 @@ def render_document_correction_dashboard():
     
     # 탭 1: 교정 현황 개요
     with tabs[0]:
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-        st.markdown('### 주요 지표')
+        # 주요 지표 카드 - HTML 그리드 사용
+        total_docs = df["교정수량"].sum()
+        total_errors = df["총오류수"].sum()
+        avg_errors = round(df["총오류수"].sum() / df["교정수량"].sum(), 2)
+        avg_time = round(df["교정시간(분)"].mean(), 1)
         
-        # 주요 지표 카드
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            total_docs = df["교정수량"].sum()
-            st.markdown(f'''
+        st.markdown(f'''
+        <div class="metrics-grid">
             <div class="metric-card">
-                <h3>총 교정 문서</h3>
-                <h2>{total_docs:,}건</h2>
+                <h3 style="margin:0; color:#64748b; font-size:1rem; font-weight:500;">총 교정 문서</h3>
+                <h2 style="margin:0.5rem 0; color:#1e293b; font-size:2rem; font-weight:700;">{total_docs:,}건</h2>
             </div>
-            ''', unsafe_allow_html=True)
-        
-        with col2:
-            total_errors = df["총오류수"].sum()
-            st.markdown(f'''
             <div class="metric-card">
-                <h3>총 발견 오류</h3>
-                <h2>{total_errors:,}건</h2>
+                <h3 style="margin:0; color:#64748b; font-size:1rem; font-weight:500;">총 발견 오류</h3>
+                <h2 style="margin:0.5rem 0; color:#1e293b; font-size:2rem; font-weight:700;">{total_errors:,}건</h2>
             </div>
-            ''', unsafe_allow_html=True)
-        
-        with col3:
-            avg_errors = round(df["총오류수"].sum() / df["교정수량"].sum(), 2)
-            st.markdown(f'''
             <div class="metric-card">
-                <h3>문서당 평균 오류</h3>
-                <h2>{avg_errors}건</h2>
+                <h3 style="margin:0; color:#64748b; font-size:1rem; font-weight:500;">문서당 평균 오류</h3>
+                <h2 style="margin:0.5rem 0; color:#1e293b; font-size:2rem; font-weight:700;">{avg_errors}건</h2>
             </div>
-            ''', unsafe_allow_html=True)
-        
-        with col4:
-            avg_time = round(df["교정시간(분)"].mean(), 1)
-            st.markdown(f'''
             <div class="metric-card">
-                <h3>평균 교정 시간</h3>
-                <h2>{avg_time}분</h2>
+                <h3 style="margin:0; color:#64748b; font-size:1rem; font-weight:500;">평균 교정 시간</h3>
+                <h2 style="margin:0.5rem 0; color:#1e293b; font-size:2rem; font-weight:700;">{avg_time}분</h2>
             </div>
-            ''', unsafe_allow_html=True)
+        </div>
+        ''', unsafe_allow_html=True)
         
-        st.markdown('</div>', unsafe_allow_html=True)
-        
-        # 문서 유형별 현황
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-        st.markdown('### 문서 유형별 교정 현황')
-        
-        doc_type_counts = df.groupby("문서유형").agg({
-            "교정수량": "sum",
-            "총오류수": "sum"
-        }).reset_index()
-        
-        doc_type_counts = doc_type_counts.sort_values("교정수량", ascending=False)
-        
-        fig = px.bar(
-            doc_type_counts,
-            x="문서유형",
-            y="교정수량",
-            color="총오류수",
-            color_continuous_scale="Blues",
-            title="문서 유형별 교정 수량 및 오류 수",
-            text_auto=True
-        )
-        
-        fig.update_layout(
-            height=400,
-            xaxis_title="문서 유형",
-            yaxis_title="교정 수량 (건)",
-            coloraxis_colorbar_title="총 오류 수",
-            font=dict(family="Noto Sans KR, sans-serif", size=14),
-            title_font=dict(family="Noto Sans KR, sans-serif", size=18),
-            plot_bgcolor="rgba(0,0,0,0)",
-            paper_bgcolor="rgba(0,0,0,0)"
-        )
-        
-        fig.update_traces(
-            marker_line_width=0,
-            marker_line_color="white",
-            hovertemplate="<b>%{x}</b><br>교정 수량: %{y}건<br>총 오류 수: %{marker.color}건"
-        )
-        
-        st.plotly_chart(fig, use_container_width=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-        
-        # 오류 유형별 분포
+        # 문서 유형별 현황 및 오류 유형별 분포
         col1, col2 = st.columns([3, 2])
         
         with col1:
-            st.markdown('<div class="card">', unsafe_allow_html=True)
-            st.markdown('### 오류 유형별 분포')
+            st.markdown('<div class="chart-container">', unsafe_allow_html=True)
+            st.markdown('<div class="chart-title">문서 유형별 교정 현황</div>', unsafe_allow_html=True)
+            
+            doc_type_counts = df.groupby("문서유형").agg({
+                "교정수량": "sum",
+                "총오류수": "sum"
+            }).reset_index()
+            
+            doc_type_counts = doc_type_counts.sort_values("교정수량", ascending=False)
+            
+            fig = px.bar(
+                doc_type_counts,
+                x="문서유형",
+                y="교정수량",
+                color="총오류수",
+                color_continuous_scale="Blues",
+                text_auto=True
+            )
+            
+            fig.update_layout(
+                height=350,
+                margin=dict(t=10, b=40, l=40, r=10),
+                xaxis_title="문서 유형",
+                yaxis_title="교정 수량 (건)",
+                coloraxis_colorbar_title="총 오류 수",
+                plot_bgcolor="rgba(0,0,0,0)",
+                paper_bgcolor="rgba(0,0,0,0)"
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+            st.markdown('</div>', unsafe_allow_html=True)
+            
+        with col2:
+            st.markdown('<div class="chart-container">', unsafe_allow_html=True)
+            st.markdown('<div class="chart-title">오류 유형별 분포</div>', unsafe_allow_html=True)
             
             error_types = {
                 "문법 오류": df["문법오류"].sum(),
@@ -728,49 +774,18 @@ def render_document_correction_dashboard():
             
             fig_pie.update_layout(
                 height=350,
+                margin=dict(t=10, b=10, l=10, r=10),
                 legend_title="오류 유형",
-                font=dict(family="Noto Sans KR, sans-serif", size=14),
-                margin=dict(t=30, b=0, l=0, r=0),
                 plot_bgcolor="rgba(0,0,0,0)",
                 paper_bgcolor="rgba(0,0,0,0)"
-            )
-            
-            fig_pie.update_traces(
-                textposition='inside',
-                textinfo='percent+label',
-                hovertemplate="<b>%{label}</b><br>오류 수: %{value}건<br>비율: %{percent}"
             )
             
             st.plotly_chart(fig_pie, use_container_width=True)
             st.markdown('</div>', unsafe_allow_html=True)
         
-        with col2:
-            st.markdown('<div class="card">', unsafe_allow_html=True)
-            st.markdown('### 오류 유형별 비율')
-            
-            total = sum(error_types.values())
-            
-            for error_type, count in error_types.items():
-                percentage = round((count / total) * 100, 1)
-                color = "#3b82f6" if error_type == "문법 오류" else "#10b981" if error_type == "맞춤법 오류" else "#f59e0b" if error_type == "문체 문제" else "#ef4444"
-                
-                st.markdown(f'''
-                <div style="margin-bottom: 1rem;">
-                    <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
-                        <span style="font-weight: 500; color: #334155;">{error_type}</span>
-                        <span style="font-weight: 600; color: {color};">{count:,}건 ({percentage}%)</span>
-                    </div>
-                    <div style="height: 8px; background-color: #e2e8f0; border-radius: 4px; overflow: hidden;">
-                        <div style="height: 100%; width: {percentage}%; background-color: {color};"></div>
-                    </div>
-                </div>
-                ''', unsafe_allow_html=True)
-            
-            st.markdown('</div>', unsafe_allow_html=True)
-        
         # 교정 진행 상태
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-        st.markdown('### 교정 진행 상태')
+        st.markdown('<div class="chart-container">', unsafe_allow_html=True)
+        st.markdown('<div class="chart-title">교정 진행 상태</div>', unsafe_allow_html=True)
         
         status_counts = df["상태"].value_counts().reset_index()
         status_counts.columns = ["상태", "문서수"]
@@ -791,23 +806,17 @@ def render_document_correction_dashboard():
         
         fig_status.update_layout(
             height=250,
+            margin=dict(t=10, b=40, l=40, r=10),
             xaxis_title="문서 수",
             yaxis_title="상태",
             showlegend=False,
-            font=dict(family="Noto Sans KR, sans-serif", size=14),
-            margin=dict(t=0, b=0, l=0, r=0),
             plot_bgcolor="rgba(0,0,0,0)",
             paper_bgcolor="rgba(0,0,0,0)"
         )
         
-        fig_status.update_traces(
-            marker_line_width=0,
-            hovertemplate="<b>%{y}</b>: %{x}건"
-        )
-        
         st.plotly_chart(fig_status, use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
-        
+    
     # 탭 2: 상세 분석
     with tabs[1]:
         st.markdown('<div class="card">', unsafe_allow_html=True)
@@ -1001,6 +1010,9 @@ def render_document_correction_dashboard():
                     # 상세 보기 버튼 (실제로는 상세 페이지로 연결)
                     if st.button(f"상세 보기 #{i+1}", key=f"view_{item['id']}"):
                         st.session_state.selected_history = item["id"]
+    
+    # 대시보드 컨테이너 종료
+    st.markdown('</div>', unsafe_allow_html=True)
 
 # Ollama 설정 및 모델 관련 함수 수정
 def get_ollama_llm(model_name="llama3.2"):
@@ -1408,18 +1420,573 @@ def render_jd_rfp_search():
                     }
                 ])
 
-# 메인 함수 - 이전 메뉴 스타일로 복원
+# 고객 관리 CRM 대시보드 기능 개선
+def render_customer_management_crm():
+    st.header("고객 관리 CRM", divider="orange")
+    
+    # CSS 스타일 정의
+    st.markdown("""
+    <style>
+        /* 메트릭 카드 그리드 */
+        .crm-metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+        
+        /* 메트릭 카드 */
+        .crm-metric-card {
+            background-color: white;
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+            text-align: center;
+            height: 100%;
+            min-height: 140px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            border-top: 4px solid #3b82f6;
+        }
+        
+        /* 매출 메트릭 카드 */
+        .revenue-card {
+            border-top-color: #10b981;
+        }
+        
+        /* 이번 달 메트릭 카드 */
+        .monthly-card {
+            border-top-color: #f59e0b;
+        }
+        
+        /* 전월 대비 메트릭 카드 */
+        .growth-card {
+            border-top-color: #8b5cf6;
+        }
+        
+        /* CRM 카드 스타일 */
+        .crm-card {
+            background-color: white;
+            border-radius: 12px;
+            padding: 16px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            margin-bottom: 16px;
+            border: 1px solid #e2e8f0;
+            transition: all 0.2s ease;
+        }
+        
+        .crm-card:hover {
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            border-color: #cbd5e1;
+        }
+        
+        .customer-name {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #1e3a8a;
+        }
+        
+        .customer-meta {
+            font-size: 0.85rem;
+            color: #64748b;
+            margin-bottom: 8px;
+        }
+        
+        .price-tag {
+            display: inline-block;
+            padding: 3px 8px;
+            background-color: #e0f2fe;
+            color: #0284c7;
+            border-radius: 15px;
+            font-size: 0.8rem;
+            font-weight: 500;
+        }
+        
+        .deadline-tag {
+            display: inline-block;
+            padding: 3px 8px;
+            background-color: #fee2e2;
+            color: #b91c1c;
+            border-radius: 15px;
+            font-size: 0.8rem;
+            font-weight: 500;
+        }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    # 샘플 고객 데이터 생성
+    def generate_customers(n=15):
+        customers = []
+        names = ["김지민", "이서연", "박준호", "최민지", "정우진", "한소희", "강도현", "윤지원", "조현우", "신지은"]
+        companies = ["ABC주식회사", "테크스타트", "글로벌기업", "신생벤처", "대학원생", "프리랜서", "중소기업", "대기업"]
+        doc_types = ["이력서", "자기소개서", "논문", "기획서", "보고서", "번역", "사업계획서"]
+        
+        for i in range(n):
+            days_ago = np.random.randint(1, 30)
+            entry_date = (datetime.now() - timedelta(days=days_ago)).strftime('%Y-%m-%d')
+            
+            deadline_days = np.random.randint(1, 15)
+            deadline = (datetime.now() + timedelta(days=deadline_days)).strftime('%Y-%m-%d')
+            
+            doc_type = np.random.choice(doc_types)
+            price_ranges = {
+                "이력서": [50000, 150000],
+                "자기소개서": [70000, 200000],
+                "논문": [200000, 800000],
+                "기획서": [150000, 400000],
+                "보고서": [100000, 300000],
+                "번역": [150000, 500000],
+                "사업계획서": [300000, 1000000]
+            }
+            
+            price = np.random.randint(price_ranges[doc_type][0], price_ranges[doc_type][1])
+            work_count = np.random.randint(2, 10) * 500
+            
+            customers.append({
+                "id": i+1,
+                "name": np.random.choice(names),
+                "company": np.random.choice(companies),
+                "doc_type": doc_type,
+                "entry_date": entry_date,
+                "deadline": deadline,
+                "price": price,
+                "work_count": work_count,
+                "status": np.random.choice(["대기중", "진행중", "완료", "지연됨"], p=[0.2, 0.4, 0.3, 0.1])
+            })
+        
+        return customers
+    
+    # 샘플 데이터 생성 (분석용 더 많은 데이터)
+    all_customers = generate_customers(50)
+    
+    # 요약 통계 계산
+    total_customers = len(all_customers)
+    total_works = len(all_customers)  # 각 고객당 1개 작업 가정
+    total_revenue = sum(customer["price"] for customer in all_customers)
+    avg_revenue_per_customer = int(total_revenue / total_customers)
+    
+    # 이번 달 데이터 필터링 (현재 월에 해당하는 데이터)
+    current_month = datetime.now().month
+    this_month_customers = [
+        customer for customer in all_customers 
+        if datetime.strptime(customer["entry_date"], "%Y-%m-%d").month == current_month
+    ]
+    this_month_revenue = sum(customer["price"] for customer in this_month_customers)
+    
+    # 전월 대비 성장률 (랜덤 값으로 가정)
+    growth_rate = np.random.uniform(-0.05, 0.15)  # -5%에서 +15% 사이
+    
+    # 상단 메트릭 카드 표시
+    st.markdown(f'''
+    <div class="crm-metrics-grid">
+        <div class="crm-metric-card">
+            <h3 style="margin:0; color:#64748b; font-size:1rem; font-weight:500;">총 고객 수</h3>
+            <h2 style="margin:0.5rem 0; color:#1e293b; font-size:2rem; font-weight:700;">{total_customers}명</h2>
+        </div>
+        <div class="crm-metric-card revenue-card">
+            <h3 style="margin:0; color:#64748b; font-size:1rem; font-weight:500;">총 매출</h3>
+            <h2 style="margin:0.5rem 0; color:#1e293b; font-size:2rem; font-weight:700;">{total_revenue:,}원</h2>
+        </div>
+        <div class="crm-metric-card monthly-card">
+            <h3 style="margin:0; color:#64748b; font-size:1rem; font-weight:500;">이번 달 매출</h3>
+            <h2 style="margin:0.5rem 0; color:#1e293b; font-size:2rem; font-weight:700;">{this_month_revenue:,}원</h2>
+        </div>
+        <div class="crm-metric-card growth-card">
+            <h3 style="margin:0; color:#64748b; font-size:1rem; font-weight:500;">전월 대비 성장률</h3>
+            <h2 style="margin:0.5rem 0; color:{'#10b981' if growth_rate >= 0 else '#ef4444'}; font-size:2rem; font-weight:700;">{growth_rate*100:.1f}%</h2>
+        </div>
+    </div>
+    ''', unsafe_allow_html=True)
+    
+    # 필터 영역
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        doc_type_filter = st.multiselect(
+            "문서 타입",
+            ["이력서", "자기소개서", "논문", "기획서", "보고서", "번역", "사업계획서"],
+            default=[]
+        )
+    
+    with col2:
+        status_filter = st.multiselect(
+            "상태",
+            ["대기중", "진행중", "완료", "지연됨"],
+            default=[]
+        )
+    
+    with col3:
+        sort_by = st.selectbox(
+            "정렬 기준",
+            ["마감일", "가격", "등록일", "고객명"],
+            index=0
+        )
+    
+    # 필터 적용된 고객 데이터
+    customers = generate_customers(15)  # 표시용 데이터는 15개만
+    
+    # 필터 적용
+    if doc_type_filter:
+        customers = [c for c in customers if c["doc_type"] in doc_type_filter]
+    
+    if status_filter:
+        customers = [c for c in customers if c["status"] in status_filter]
+    
+    # 정렬 적용
+    if sort_by == "마감일":
+        customers = sorted(customers, key=lambda x: x["deadline"])
+    elif sort_by == "가격":
+        customers = sorted(customers, key=lambda x: x["price"], reverse=True)
+    elif sort_by == "등록일":
+        customers = sorted(customers, key=lambda x: x["entry_date"], reverse=True)
+    elif sort_by == "고객명":
+        customers = sorted(customers, key=lambda x: x["name"])
+    
+    # 고객 목록 표시
+    st.subheader(f"고객 목록 ({len(customers)}명)")
+    
+    if not customers:
+        st.info("조건에 맞는 고객이 없습니다.")
+    else:
+        # 고객 카드 표시
+        for customer in customers:
+            status_color = {
+                "대기중": "#f59e0b",
+                "진행중": "#3b82f6",
+                "완료": "#10b981",
+                "지연됨": "#ef4444"
+            }.get(customer["status"], "#6b7280")
+            
+            st.markdown(f"""
+            <div class="crm-card">
+                <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                    <div>
+                        <div class="customer-name">{customer["name"]}</div>
+                        <div class="customer-meta">{customer["company"]} • {customer["doc_type"]}</div>
+                        <div style="margin-top: 8px;">
+                            <span class="price-tag">₩{customer["price"]:,}</span>
+                            <span style="margin-left: 8px; color: #64748b; font-size: 0.85rem;">{customer["work_count"]:,}자</span>
+                        </div>
+                    </div>
+                    <div>
+                        <div style="text-align: right;">
+                            <span style="background-color: {status_color}; color: white; padding: 3px 8px; border-radius: 15px; font-size: 0.8rem;">{customer["status"]}</span>
+                        </div>
+                        <div style="margin-top: 8px; text-align: right;">
+                            <span class="customer-meta">등록일: {customer["entry_date"]}</span>
+                        </div>
+                        <div style="margin-top: 4px; text-align: right;">
+                            <span class="deadline-tag">마감: {customer["deadline"]}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+    
+    # 데이터 분석 차트
+    st.subheader("고객 데이터 분석")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        # 문서 유형별 매출 분포
+        doc_revenues = {}
+        for customer in all_customers:
+            doc_type = customer["doc_type"]
+            doc_revenues[doc_type] = doc_revenues.get(doc_type, 0) + customer["price"]
+        
+        doc_df = pd.DataFrame({
+            "문서 유형": list(doc_revenues.keys()),
+            "매출": list(doc_revenues.values())
+        })
+        
+        fig = px.pie(
+            doc_df,
+            names="문서 유형",
+            values="매출",
+            title="문서 유형별 매출 분포",
+            color_discrete_sequence=px.colors.qualitative.Pastel
+        )
+        
+        fig.update_layout(height=350)
+        st.plotly_chart(fig, use_container_width=True)
+    
+    with col2:
+        # 월별 매출 트렌드 (가상 데이터로 생성)
+        months = ["1월", "2월", "3월", "4월", "5월", "6월", "7월", "8월", "9월", "10월", "11월", "12월"]
+        current_month = datetime.now().month
+        
+        # 현재 월까지의 실제 데이터로 가정하고, 이후는 예측치로 표시
+        monthly_revenue = []
+        for i in range(1, 13):
+            if i <= current_month:
+                # 실제 데이터처럼 보이게 하기 위한 값
+                base = np.random.randint(5000000, 8000000)
+                variation = np.random.uniform(0.8, 1.2)
+                monthly_revenue.append(int(base * variation))
+            else:
+                # 예측치는 점선으로 표시할 더미 값
+                monthly_revenue.append(None)
+        
+        monthly_df = pd.DataFrame({
+            "월": months,
+            "매출": monthly_revenue
+        })
+        
+        fig = px.line(
+            monthly_df,
+            x="월",
+            y="매출",
+            title="월별 매출 트렌드",
+            markers=True
+        )
+        
+        # 현재 월까지 실선, 이후 점선으로 표시 (예측)
+        fig.update_layout(height=350)
+        st.plotly_chart(fig, use_container_width=True)
+    
+    # 대시보드 컨테이너 종료
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# 고객 챗 대시보드 기능
+def render_customer_chat():
+    st.header("고객 채팅", divider="violet")
+    
+    # CSS 스타일 정의
+    st.markdown("""
+    <style>
+        /* 채팅 인터페이스 스타일 */
+        .chat-container {
+            display: flex;
+            flex-direction: column;
+            height: 500px;
+            background-color: #f8fafc;
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid #e2e8f0;
+        }
+        
+        .chat-header {
+            padding: 15px;
+            background-color: #1e40af;
+            color: white;
+            font-weight: 600;
+            border-bottom: 1px solid #3b82f6;
+        }
+        
+        .chat-messages {
+            flex-grow: 1;
+            padding: 15px;
+            overflow-y: auto;
+            background-color: #f8fafc;
+        }
+        
+        .chat-input {
+            padding: 15px;
+            background-color: white;
+            border-top: 1px solid #e2e8f0;
+        }
+        
+        .message {
+            margin-bottom: 15px;
+            max-width: 80%;
+        }
+        
+        .message-sent {
+            margin-left: auto;
+            background-color: #1e40af;
+            color: white;
+            border-radius: 18px 18px 0 18px;
+            padding: 10px 15px;
+        }
+        
+        .message-received {
+            margin-right: auto;
+            background-color: white;
+            border: 1px solid #e2e8f0;
+            border-radius: 18px 18px 18px 0;
+            padding: 10px 15px;
+        }
+        
+        .message-time {
+            font-size: 0.7rem;
+            color: #94a3b8;
+            margin-top: 5px;
+        }
+        
+        .file-shared {
+            background-color: #f1f5f9;
+            border-radius: 12px;
+            padding: 10px;
+            margin-bottom: 15px;
+            font-size: 0.9rem;
+        }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    # 사이드바에 고객 목록
+    with st.sidebar:
+        st.subheader("고객 목록")
+        
+        # 샘플 고객 데이터
+        customers = [
+            {"id": 1, "name": "김지민", "doc_type": "이력서", "status": "진행중"},
+            {"id": 2, "name": "이서연", "doc_type": "자기소개서", "status": "대기중"},
+            {"id": 3, "name": "박준호", "doc_type": "논문", "status": "진행중"},
+            {"id": 4, "name": "최민지", "doc_type": "번역", "status": "완료"},
+            {"id": 5, "name": "정우진", "doc_type": "사업계획서", "status": "지연됨"}
+        ]
+        
+        # 고객 선택
+        selected_customer = None
+        for customer in customers:
+            status_color = {
+                "대기중": "#f59e0b",
+                "진행중": "#3b82f6",
+                "완료": "#10b981",
+                "지연됨": "#ef4444"
+            }.get(customer["status"], "#6b7280")
+            
+            if st.button(
+                f"{customer['name']} - {customer['doc_type']}",
+                key=f"customer_{customer['id']}",
+                help=f"상태: {customer['status']}"
+            ):
+                selected_customer = customer
+        
+        if "selected_customer" not in st.session_state:
+            st.session_state.selected_customer = customers[0]
+        
+        if selected_customer:
+            st.session_state.selected_customer = selected_customer
+    
+    # 채팅 메시지 초기화
+    if "chat_messages" not in st.session_state:
+        # 샘플 채팅 메시지 - user는 고객, assistant는 작업자
+        st.session_state.chat_messages = [
+            {"role": "user", "content": "안녕하세요! 문서 교정 진행상황이 궁금합니다.", "time": "10:15 AM"},
+            {"role": "assistant", "content": "안녕하세요. 현재 문서 교정이 약 60% 진행되었습니다. 예상보다 오류가 많아 조금 더 시간이 필요합니다.", "time": "10:16 AM"},
+            {"role": "user", "content": "네, 알겠습니다. 대략 언제쯤 완료될까요?", "time": "10:17 AM"},
+            {"role": "assistant", "content": "내일 오후 3시까지는 완료할 예정입니다. 혹시 더 빨리 필요하신가요?", "time": "10:18 AM"},
+            {"role": "user", "content": "아니요, 내일이면 충분합니다. 감사합니다!", "time": "10:20 AM"},
+            {"role": "assistant", "content": "네, 확인했습니다. 궁금하신 점 있으시면 언제든 문의해주세요.", "time": "10:21 AM"},
+        ]
+    
+    # 선택된 고객 정보 표시
+    customer = st.session_state.selected_customer
+    
+    st.subheader(f"{customer['name']}님과의 대화")
+    st.caption(f"문서: {customer['doc_type']} | 상태: {customer['status']}")
+    
+    # 파일 업로드 섹션
+    uploaded_file = st.file_uploader("파일 공유하기", type=["pdf", "docx", "txt", "jpg", "png"], key="customer_file_upload")
+    
+    if uploaded_file:
+        # 파일 공유 메시지 추가
+        file_time = datetime.now().strftime("%I:%M %p")
+        st.session_state.chat_messages.append({
+            "role": "assistant", 
+            "content": f"파일을 공유했습니다: {uploaded_file.name}", 
+            "time": file_time,
+            "file": uploaded_file.name
+        })
+        
+        st.success(f"파일 '{uploaded_file.name}'이(가) 성공적으로 공유되었습니다.")
+    
+    # 채팅 인터페이스
+    chat_container = st.container()
+    
+    with chat_container:
+        for msg in st.session_state.chat_messages:
+            # 메시지 방향 수정 - assistant(작업자)가 오른쪽, user(고객)가 왼쪽에 표시되도록
+            align = "right" if msg["role"] == "assistant" else "left"
+            bg_color = "#1e40af" if msg["role"] == "assistant" else "white"
+            text_color = "white" if msg["role"] == "assistant" else "#1e293b"
+            
+            if "file" in msg:
+                st.markdown(f"""
+                <div style="display: flex; justify-content: {align}; margin-bottom: 15px;">
+                    <div class="file-shared" style="max-width: 80%;">
+                        <div style="display: flex; align-items: center;">
+                            <span style="font-size: 1.5rem; margin-right: 10px;">📎</span>
+                            <div>
+                                <div style="font-weight: 500; color: #1e293b;">{msg["file"]}</div>
+                                <div class="message-time">{msg["time"]}</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                # 메시지 말풍선 모양도 방향에 맞게 수정
+                border_radius = "18px 18px 0 18px" if msg["role"] == "assistant" else "18px 18px 18px 0"
+                border = "" if msg["role"] == "assistant" else "1px solid #e2e8f0"
+                time_color = "rgba(255,255,255,0.7)" if msg["role"] == "assistant" else "#94a3b8"
+                
+                st.markdown(f"""
+                <div style="display: flex; justify-content: {align}; margin-bottom: 15px;">
+                    <div class="message" style="background-color: {bg_color}; color: {text_color}; border-radius: {border_radius}; padding: 10px 15px; border: {border};">
+                        <div>{msg["content"]}</div>
+                        <div class="message-time" style="color: {time_color};">{msg["time"]}</div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+    
+    # 채팅 입력창
+    prompt = st.text_input("메시지를 입력하세요...", key="customer_chat_input")
+    col1, col2 = st.columns([4, 1])
+    
+    with col2:
+        if st.button("전송", use_container_width=True, key="send_customer_chat"):
+            if prompt:
+                # 현재 시간 구하기
+                current_time = datetime.now().strftime("%I:%M %p")
+                
+                # 작업자(assistant) 메시지 추가 - 여기서 역할 변경
+                st.session_state.chat_messages.append({
+                    "role": "assistant",
+                    "content": prompt,
+                    "time": current_time
+                })
+                
+                # 자동 응답 (고객 응답 시뮬레이션)
+                auto_responses = [
+                    "감사합니다. 확인했습니다.",
+                    "언제쯤 완료될까요?",
+                    "수정사항을 반영해주셔서 감사합니다.",
+                    "추가로 변경하고 싶은 부분이 있습니다.",
+                    "네, 마감일 전에 완료해 주시면 감사하겠습니다."
+                ]
+                
+                # 자동 응답 지연 효과
+                time.sleep(1)
+                
+                # 고객(user) 응답 메시지 추가
+                st.session_state.chat_messages.append({
+                    "role": "user",
+                    "content": random.choice(auto_responses),
+                    "time": datetime.now().strftime("%I:%M %p")
+                })
+                
+                # 채팅 인터페이스 업데이트 - experimental_rerun() 대신 rerun() 사용
+                st.rerun()
+
+# 메인 함수 수정 - 메뉴 추가
 def main():
     # 사이드바 메뉴
     with st.sidebar:
-        st.title("AI 문서 도우미")
+        st.title("문서교정 AI Agent by Refinery")  # 여기를 변경
         st.markdown("---")
         
-        # 메뉴 선택 (이전 스타일로 복원)
+        # 메뉴 선택 (CRM과 채팅 메뉴 추가)
         page = st.radio(
             "메뉴 선택",
-            ["PDF 문서 챗봇", "문서교정 대시보드", "JD/RFP 검색 및 요약"],
-            format_func=lambda x: f"📄 {x}" if x == "PDF 문서 챗봇" else (f"📊 {x}" if x == "문서교정 대시보드" else f"🔍 {x}")
+            ["PDF 문서 챗봇", "문서교정 대시보드", "JD/RFP 검색 및 요약", "고객 관리 CRM", "고객 채팅"],
+            format_func=lambda x: f"📄 {x}" if x == "PDF 문서 챗봇" 
+                    else (f"📊 {x}" if x == "문서교정 대시보드" 
+                    else (f"🔍 {x}" if x == "JD/RFP 검색 및 요약" 
+                    else (f"👥 {x}" if x == "고객 관리 CRM" 
+                    else f"💬 {x}")))
         )
     
     # 선택된 페이지 렌더링
@@ -1429,6 +1996,10 @@ def main():
         render_document_correction_dashboard()
     elif page == "JD/RFP 검색 및 요약":
         render_jd_rfp_search()
+    elif page == "고객 관리 CRM":
+        render_customer_management_crm()
+    elif page == "고객 채팅":
+        render_customer_chat()
 
 # 앱 실행
 if __name__ == "__main__":
